@@ -2,23 +2,35 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { motion } from 'framer-motion';
+import { motion, Variants } from 'framer-motion';
 import { ArrowLeft, FolderPlus, FolderOpen } from 'lucide-react';
 
+// --- TYPESCRIPT INTERFACES ---
+export interface Profile {
+  id: string | number;
+  name: string;
+  [key: string]: any;
+}
+
 // --- FRAMER MOTION VARIANTS ---
-const containerVariants = {
+// FIX: Added 'Variants' type and 'as const' to resolve Framer Motion TypeScript errors
+const containerVariants: Variants = {
   hidden: { opacity: 0 },
   show: { opacity: 1, transition: { staggerChildren: 0.05 } }
 };
 
-const itemVariants = {
+const itemVariants: Variants = {
   hidden: { opacity: 0, y: 15 },
-  show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } }
+  show: { 
+    opacity: 1, 
+    y: 0, 
+    transition: { type: 'spring' as const, stiffness: 300, damping: 24 } 
+  }
 };
 
 export default function ExpenseProfilesPage() {
   const router = useRouter();
-  const [profiles, setProfiles] = useState<any[]>([]);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
   const [newProfileName, setNewProfileName] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -44,6 +56,7 @@ export default function ExpenseProfilesPage() {
     setIsAdding(true);
     const res = await fetch('/api/expense-profiles', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: newProfileName.trim() }),
     });
 

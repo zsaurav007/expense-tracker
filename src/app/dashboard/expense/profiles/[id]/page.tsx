@@ -2,18 +2,23 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { motion } from 'framer-motion';
+import { motion, Variants } from 'framer-motion';
 import { ArrowLeft, FolderOpen, Calendar } from 'lucide-react';
 
 // --- FRAMER MOTION VARIANTS ---
-const containerVariants = {
+// FIX: Added 'Variants' type and 'as const' to resolve Framer Motion TypeScript errors
+const containerVariants: Variants = {
   hidden: { opacity: 0 },
   show: { opacity: 1, transition: { staggerChildren: 0.05 } }
 };
 
-const itemVariants = {
+const itemVariants: Variants = {
   hidden: { opacity: 0, y: 15 },
-  show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } }
+  show: { 
+    opacity: 1, 
+    y: 0, 
+    transition: { type: 'spring' as const, stiffness: 300, damping: 24 } 
+  }
 };
 
 export default function ProfileHistoryPage() {
@@ -72,7 +77,7 @@ export default function ProfileHistoryPage() {
           {['week', 'month', 'year', 'all'].map((f) => (
             <button
               key={f}
-              onClick={() => setFilter(f as any)}
+              onClick={() => setFilter(f as 'week' | 'month' | 'year' | 'all')}
               className={`px-4 py-2 text-sm font-medium rounded-full transition-colors ${
                 filter === f 
                   ? 'bg-blue-600 text-white' 

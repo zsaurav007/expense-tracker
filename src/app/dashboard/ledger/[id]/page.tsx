@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { createPortal } from 'react-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { 
   ArrowLeft, ArrowUpRight, ArrowDownRight, CheckCircle2, 
   Wallet, HandCoins, FileSpreadsheet, Printer, ChevronDown, ChevronUp, Edit, Trash2 
@@ -11,14 +11,19 @@ import {
 import CustomDropdown from '@/components/CustomDropdown';
 
 // --- FRAMER MOTION VARIANTS ---
-const containerVariants = {
+// FIX: Added 'Variants' type and 'as const' to resolve Framer Motion TypeScript errors
+const containerVariants: Variants = {
   hidden: { opacity: 0 },
   show: { opacity: 1, transition: { staggerChildren: 0.05 } }
 };
 
-const itemVariants = {
+const itemVariants: Variants = {
   hidden: { opacity: 0, y: 15 },
-  show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } }
+  show: { 
+    opacity: 1, 
+    y: 0, 
+    transition: { type: 'spring' as const, stiffness: 300, damping: 24 } 
+  }
 };
 
 export default function PersonLedgerPage() {
@@ -48,7 +53,7 @@ export default function PersonLedgerPage() {
   ]);
 
   const fetchLedger = async () => {
-    const res = await fetch(`/api/people/${params.id}`);
+    const res = await fetch(`/api/people/${params.id as string}`);
     if (res.ok) {
       const data = await res.json();
       setPerson(data.person);
@@ -61,6 +66,7 @@ export default function PersonLedgerPage() {
   useEffect(() => { 
     setMounted(true);
     fetchLedger(); 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params.id]);
 
   const handleAddMethod = (newMethod: string) => {
@@ -108,7 +114,7 @@ export default function PersonLedgerPage() {
       method,
       date,
       description,
-      personId: params.id,
+      personId: params.id as string,
       source: person?.name || 'Ledger', 
     };
 
