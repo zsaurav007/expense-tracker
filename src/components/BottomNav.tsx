@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { motion } from 'framer-motion';
 import { Home, Users, Settings, TrendingUp, TrendingDown } from 'lucide-react';
 
 export default function BottomNav() {
@@ -27,14 +28,32 @@ export default function BottomNav() {
             <Link
               key={item.name}
               href={item.href}
-              className={`flex flex-col items-center justify-center w-14 h-full space-y-1 transition-colors ${
-                isActive ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'
-              }`}
+              className="flex-1 flex justify-center items-center h-full outline-none"
+              style={{ WebkitTapHighlightColor: 'transparent' }} // Removes ugly mobile browser tap flash
             >
-              <Icon className={`h-6 w-6 ${isActive ? 'stroke-[2.5px]' : 'stroke-2'}`} />
-              <span className={`text-[10px] font-medium ${isActive ? 'font-semibold' : ''}`}>
-                {item.name}
-              </span>
+              {/* Framer Motion wrapper for instant touch feedback */}
+              <motion.div
+                whileTap={{ scale: 0.8 }} // Squishes down instantly to 80% size on tap
+                transition={{ type: 'spring', stiffness: 400, damping: 17 }}
+                className={`flex flex-col items-center justify-center w-14 space-y-1 transition-colors ${
+                  isActive ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'
+                }`}
+              >
+                {/* Active Indicator Dot (Optional but adds a premium feel) */}
+                <div className="relative">
+                  <Icon className={`h-6 w-6 ${isActive ? 'stroke-[2.5px]' : 'stroke-2'}`} />
+                  {isActive && (
+                    <motion.span 
+                      layoutId="activeNavDot"
+                      className="absolute -top-1 -right-1 h-2 w-2 bg-blue-600 rounded-full border-2 border-white"
+                    />
+                  )}
+                </div>
+
+                <span className={`text-[10px] font-medium ${isActive ? 'font-semibold' : ''}`}>
+                  {item.name}
+                </span>
+              </motion.div>
             </Link>
           );
         })}

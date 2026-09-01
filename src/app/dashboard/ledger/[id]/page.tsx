@@ -3,11 +3,23 @@
 import { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { createPortal } from 'react-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import { 
   ArrowLeft, ArrowUpRight, ArrowDownRight, CheckCircle2, 
   Wallet, HandCoins, FileSpreadsheet, Printer, ChevronDown, ChevronUp, Edit, Trash2 
 } from 'lucide-react';
 import CustomDropdown from '@/components/CustomDropdown';
+
+// --- FRAMER MOTION VARIANTS ---
+const containerVariants = {
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: { staggerChildren: 0.05 } }
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 15 },
+  show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } }
+};
 
 export default function PersonLedgerPage() {
   const router = useRouter();
@@ -254,7 +266,11 @@ export default function PersonLedgerPage() {
 
       {/* --- INTERACTIVE APP UI (Hidden during PDF generation) --- */}
       <div className="print:hidden">
-        <header className="px-6 pt-8 pb-4 bg-white border-b border-slate-100 flex items-center gap-4 sticky top-0 z-10">
+        <motion.header 
+          initial={{ y: -20, opacity: 0 }}
+          animate={{ y: 0, opacity: 1 }}
+          className="px-6 pt-8 pb-4 bg-white border-b border-slate-100 flex items-center gap-4 sticky top-0 z-10"
+        >
           <button onClick={() => router.back()} className="p-2 -ml-2 hover:bg-slate-50 rounded-full transition-colors">
             <ArrowLeft className="h-6 w-6 text-slate-700" />
           </button>
@@ -268,195 +284,216 @@ export default function PersonLedgerPage() {
               <Printer className="h-5 w-5" />
             </button>
           </div>
-        </header>
+        </motion.header>
 
-        <div className="p-6 pb-2 animate-in fade-in slide-in-from-top-4 duration-500">
-          <div className={`p-8 rounded-3xl text-center shadow-sm border transition-colors duration-500 ${
-            netBalance > 0 ? 'bg-green-600 border-green-700 text-white' : 
-            netBalance < 0 ? 'bg-red-600 border-red-700 text-white' : 'bg-white border-slate-200 text-slate-800'
-          }`}>
-            <p className="text-sm font-medium mb-2 opacity-90">
-              {netBalance > 0 ? `${person.name} owes you` : netBalance < 0 ? `You owe ${person.name}` : 'Accounts Settled'}
-            </p>
-            <h2 className="text-5xl font-extrabold tracking-tight">
-              ৳{Math.abs(netBalance).toLocaleString()}
-            </h2>
-          </div>
-        </div>
+        <motion.div 
+          variants={containerVariants}
+          initial="hidden"
+          animate="show"
+        >
+          <motion.div variants={itemVariants} className="p-6 pb-2">
+            <div className={`p-8 rounded-3xl text-center shadow-sm border transition-colors duration-500 ${
+              netBalance > 0 ? 'bg-green-600 border-green-700 text-white' : 
+              netBalance < 0 ? 'bg-red-600 border-red-700 text-white' : 'bg-white border-slate-200 text-slate-800'
+            }`}>
+              <p className="text-sm font-medium mb-2 opacity-90">
+                {netBalance > 0 ? `${person.name} owes you` : netBalance < 0 ? `You owe ${person.name}` : 'Accounts Settled'}
+              </p>
+              <h2 className="text-5xl font-extrabold tracking-tight">
+                ৳{Math.abs(netBalance).toLocaleString()}
+              </h2>
+            </div>
+          </motion.div>
 
-        <div className="px-6 py-4 mx-6 mb-4 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col gap-2 text-sm animate-in fade-in slide-in-from-top-2 duration-500 delay-100 fill-mode-both">
-          <div className="flex justify-between items-center">
-            <span className="text-slate-500 font-medium">Overall Loan Given:</span>
-            <span className="font-bold text-red-600">৳{totalGiven.toLocaleString()}</span>
-          </div>
-          <div className="flex justify-between items-center">
-            <span className="text-slate-500 font-medium">Overall Loan Taken:</span>
-            <span className="font-bold text-green-600">৳{totalTaken.toLocaleString()}</span>
-          </div>
-          <div className="flex justify-between items-center pt-2 border-t border-slate-100 mt-1">
-            <span className="text-slate-700 font-bold">Adjusted Balance:</span>
-            <span className={`font-bold ${netBalance > 0 ? 'text-green-600' : netBalance < 0 ? 'text-red-600' : 'text-slate-900'}`}>
-              {netBalance > 0 ? `They owe ৳${Math.abs(netBalance).toLocaleString()}` : netBalance < 0 ? `You owe ৳${Math.abs(netBalance).toLocaleString()}` : 'Settled'}
-            </span>
-          </div>
-        </div>
+          <motion.div variants={itemVariants} className="px-6 py-4 mx-6 mb-4 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col gap-2 text-sm">
+            <div className="flex justify-between items-center">
+              <span className="text-slate-500 font-medium">Overall Loan Given:</span>
+              <span className="font-bold text-red-600">৳{totalGiven.toLocaleString()}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-slate-500 font-medium">Overall Loan Taken:</span>
+              <span className="font-bold text-green-600">৳{totalTaken.toLocaleString()}</span>
+            </div>
+            <div className="flex justify-between items-center pt-2 border-t border-slate-100 mt-1">
+              <span className="text-slate-700 font-bold">Adjusted Balance:</span>
+              <span className={`font-bold ${netBalance > 0 ? 'text-green-600' : netBalance < 0 ? 'text-red-600' : 'text-slate-900'}`}>
+                {netBalance > 0 ? `They owe ৳${Math.abs(netBalance).toLocaleString()}` : netBalance < 0 ? `You owe ৳${Math.abs(netBalance).toLocaleString()}` : 'Settled'}
+              </span>
+            </div>
+          </motion.div>
 
-        <div className="px-6 pb-6 animate-in fade-in slide-in-from-bottom-4 duration-500 delay-200 fill-mode-both">
-          <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">Actions</h3>
-          <div className="grid grid-cols-2 gap-3">
-            <button onClick={() => handleActionClick('LEND')} disabled={!canLend} className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-2 hover:bg-slate-50 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-sm">
-              <ArrowUpRight className="h-6 w-6 text-red-500" />
-              <span className="text-sm font-semibold text-slate-700">Give Loan</span>
-            </button>
-            
-            <button onClick={() => handleActionClick('BORROW')} disabled={!canBorrow} className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-2 hover:bg-slate-50 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-sm">
-              <ArrowDownRight className="h-6 w-6 text-green-500" />
-              <span className="text-sm font-semibold text-slate-700">Take Loan</span>
-            </button>
-            
-            <button onClick={() => handleActionClick('LEND_REPAYMENT')} disabled={!canReceiveInstallment} className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-2 hover:bg-slate-50 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-sm">
-              <HandCoins className="h-6 w-6 text-green-500" />
-              <span className="text-sm font-semibold text-slate-700 text-center">Receive Installment</span>
-            </button>
-            
-            <button onClick={() => handleActionClick('BORROW_REPAYMENT')} disabled={!canPayInstallment} className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-2 hover:bg-slate-50 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-sm">
-              <Wallet className="h-6 w-6 text-red-500" />
-              <span className="text-sm font-semibold text-slate-700 text-center">Pay Installment</span>
-            </button>
-          </div>
-        </div>
+          <motion.div variants={itemVariants} className="px-6 pb-6">
+            <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">Actions</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <button onClick={() => handleActionClick('LEND')} disabled={!canLend} className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-2 hover:bg-slate-50 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-sm">
+                <ArrowUpRight className="h-6 w-6 text-red-500" />
+                <span className="text-sm font-semibold text-slate-700">Give Loan</span>
+              </button>
+              
+              <button onClick={() => handleActionClick('BORROW')} disabled={!canBorrow} className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-2 hover:bg-slate-50 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-sm">
+                <ArrowDownRight className="h-6 w-6 text-green-500" />
+                <span className="text-sm font-semibold text-slate-700">Take Loan</span>
+              </button>
+              
+              <button onClick={() => handleActionClick('LEND_REPAYMENT')} disabled={!canReceiveInstallment} className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-2 hover:bg-slate-50 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-sm">
+                <HandCoins className="h-6 w-6 text-green-500" />
+                <span className="text-sm font-semibold text-slate-700 text-center">Receive Installment</span>
+              </button>
+              
+              <button onClick={() => handleActionClick('BORROW_REPAYMENT')} disabled={!canPayInstallment} className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-2 hover:bg-slate-50 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-sm">
+                <Wallet className="h-6 w-6 text-red-500" />
+                <span className="text-sm font-semibold text-slate-700 text-center">Pay Installment</span>
+              </button>
+            </div>
+          </motion.div>
 
-        <div className="px-6 pb-24">
-          <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Ledger History</h3>
-          <div className="space-y-3">
-            {displayTxs.length === 0 ? (
-              <p className="text-center text-slate-400 py-8 bg-white rounded-2xl border border-dashed border-slate-200">No transactions recorded yet.</p>
-            ) : (
-              displayTxs.map((tx, index) => {
-                const isExpanded = expandedTxId === tx.id;
-                
-                return (
-                  <div 
-                    key={tx.id} 
-                    style={{ animationDelay: `${300 + (index * 50)}ms` }}
-                    className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden transition-all duration-300 animate-in fade-in slide-in-from-bottom-4 fill-mode-both"
-                  >
-                    <div className="flex items-center justify-between p-4 cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => setExpandedTxId(isExpanded ? null : tx.id)}>
-                      <div className="flex items-center gap-3">
-                        <div className={`h-10 w-10 rounded-full flex items-center justify-center border shrink-0 transition-colors ${
-                          ['LEND', 'BORROW_REPAYMENT'].includes(tx.type) ? 'bg-red-50 border-red-100' : 'bg-green-50 border-green-100'
-                        }`}>
-                          {tx.type === 'LEND' && <ArrowUpRight className="h-5 w-5 text-red-600" />}
-                          {tx.type === 'BORROW' && <ArrowDownRight className="h-5 w-5 text-green-600" />}
-                          {tx.type === 'LEND_REPAYMENT' && <HandCoins className="h-5 w-5 text-green-600" />}
-                          {tx.type === 'BORROW_REPAYMENT' && <Wallet className="h-5 w-5 text-red-600" />}
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-1">
-                            <p className="font-semibold text-slate-900 leading-tight">
-                              {tx.type === 'LEND' && 'Loan Given'}
-                              {tx.type === 'BORROW' && 'Loan Taken'}
-                              {tx.type === 'LEND_REPAYMENT' && 'Received Installment'}
-                              {tx.type === 'BORROW_REPAYMENT' && 'Paid Installment'}
-                            </p>
-                            <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`} />
-                          </div>
-                          <p className="text-xs text-slate-500 mt-0.5">{new Date(tx.date).toLocaleDateString()}</p>
-                        </div>
-                      </div>
-                      
-                      <div className="text-right">
-                        <p className={`font-bold ${['LEND', 'BORROW_REPAYMENT'].includes(tx.type) ? 'text-red-600' : 'text-green-600'}`}>
-                          {['LEND', 'BORROW_REPAYMENT'].includes(tx.type) ? '-' : '+'}৳{Number(tx.amount).toLocaleString()}
-                        </p>
-                        <p className={`text-[11px] font-bold mt-0.5 ${tx.runningBalanceAmt === 0 ? 'text-slate-400' : tx.runningBalanceAmt > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                          {tx.shortBalanceText}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isExpanded ? 'max-h-48 opacity-100' : 'max-h-0 opacity-0'}`}>
-                      <div className="px-4 pb-4 pt-2 bg-slate-50/50 border-t border-slate-100 text-sm">
-                        <div className="grid grid-cols-2 gap-4">
-                          <div>
-                            <p className="text-slate-500 font-medium text-xs mb-1">Method</p>
-                            <p className="text-slate-900">{tx.transaction_method}</p>
+          <motion.div variants={itemVariants} className="px-6 pb-24">
+            <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Ledger History</h3>
+            <div className="space-y-3">
+              {displayTxs.length === 0 ? (
+                <p className="text-center text-slate-400 py-8 bg-white rounded-2xl border border-dashed border-slate-200">No transactions recorded yet.</p>
+              ) : (
+                displayTxs.map((tx) => {
+                  const isExpanded = expandedTxId === tx.id;
+                  
+                  return (
+                    <motion.div 
+                      key={tx.id} 
+                      variants={itemVariants}
+                      className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden transition-all duration-300"
+                    >
+                      <div className="flex items-center justify-between p-4 cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => setExpandedTxId(isExpanded ? null : tx.id)}>
+                        <div className="flex items-center gap-3">
+                          <div className={`h-10 w-10 rounded-full flex items-center justify-center border shrink-0 transition-colors ${
+                            ['LEND', 'BORROW_REPAYMENT'].includes(tx.type) ? 'bg-red-50 border-red-100' : 'bg-green-50 border-green-100'
+                          }`}>
+                            {tx.type === 'LEND' && <ArrowUpRight className="h-5 w-5 text-red-600" />}
+                            {tx.type === 'BORROW' && <ArrowDownRight className="h-5 w-5 text-green-600" />}
+                            {tx.type === 'LEND_REPAYMENT' && <HandCoins className="h-5 w-5 text-green-600" />}
+                            {tx.type === 'BORROW_REPAYMENT' && <Wallet className="h-5 w-5 text-red-600" />}
                           </div>
                           <div>
-                            <p className="text-slate-500 font-medium text-xs mb-1">Remarks / Reason</p>
-                            <p className={`text-slate-900 ${tx.description?.includes('(Edited)') ? 'italic' : ''}`}>{tx.description || 'None provided'}</p>
+                            <div className="flex items-center gap-1">
+                              <p className="font-semibold text-slate-900 leading-tight">
+                                {tx.type === 'LEND' && 'Loan Given'}
+                                {tx.type === 'BORROW' && 'Loan Taken'}
+                                {tx.type === 'LEND_REPAYMENT' && 'Received Installment'}
+                                {tx.type === 'BORROW_REPAYMENT' && 'Paid Installment'}
+                              </p>
+                              <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`} />
+                            </div>
+                            <p className="text-xs text-slate-500 mt-0.5">{new Date(tx.date).toLocaleDateString()}</p>
                           </div>
                         </div>
                         
-                        <div className="flex gap-2 mt-4 pt-4 border-t border-slate-200">
-                          <button onClick={() => handleEditClick(tx)} className="flex-1 py-2 flex items-center justify-center gap-1 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-100 transition-colors">
-                            <Edit className="h-3.5 w-3.5" /> Edit
-                          </button>
-                          <button onClick={() => handleDeleteClick(tx.id)} className="flex-1 py-2 flex items-center justify-center gap-1 bg-red-50 text-red-600 rounded-lg text-xs font-bold hover:bg-red-100 transition-colors">
-                            <Trash2 className="h-3.5 w-3.5" /> Delete
-                          </button>
+                        <div className="text-right">
+                          <p className={`font-bold ${['LEND', 'BORROW_REPAYMENT'].includes(tx.type) ? 'text-red-600' : 'text-green-600'}`}>
+                            {['LEND', 'BORROW_REPAYMENT'].includes(tx.type) ? '-' : '+'}৳{Number(tx.amount).toLocaleString()}
+                          </p>
+                          <p className={`text-[11px] font-bold mt-0.5 ${tx.runningBalanceAmt === 0 ? 'text-slate-400' : tx.runningBalanceAmt > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {tx.shortBalanceText}
+                          </p>
                         </div>
                       </div>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </div>
+
+                      <div className={`overflow-hidden transition-all duration-300 ease-in-out ${isExpanded ? 'max-h-48 opacity-100' : 'max-h-0 opacity-0'}`}>
+                        <div className="px-4 pb-4 pt-2 bg-slate-50/50 border-t border-slate-100 text-sm">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <p className="text-slate-500 font-medium text-xs mb-1">Method</p>
+                              <p className="text-slate-900">{tx.transaction_method}</p>
+                            </div>
+                            <div>
+                              <p className="text-slate-500 font-medium text-xs mb-1">Remarks / Reason</p>
+                              <p className={`text-slate-900 ${tx.description?.includes('(Edited)') ? 'italic' : ''}`}>{tx.description || 'None provided'}</p>
+                            </div>
+                          </div>
+                          
+                          <div className="flex gap-2 mt-4 pt-4 border-t border-slate-200">
+                            <button onClick={() => handleEditClick(tx)} className="flex-1 py-2 flex items-center justify-center gap-1 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-100 transition-colors">
+                              <Edit className="h-3.5 w-3.5" /> Edit
+                            </button>
+                            <button onClick={() => handleDeleteClick(tx.id)} className="flex-1 py-2 flex items-center justify-center gap-1 bg-red-50 text-red-600 rounded-lg text-xs font-bold hover:bg-red-100 transition-colors">
+                              <Trash2 className="h-3.5 w-3.5" /> Delete
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })
+              )}
+            </div>
+          </motion.div>
+        </motion.div>
 
         {/* Action / Edit Modal */}
-        {showModal && mounted && createPortal(
-          <div className="fixed inset-0 z-[9999] flex flex-col justify-end">
-            <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm transition-opacity duration-300" onClick={() => setShowModal(false)} />
-            <div className="relative bg-white rounded-t-3xl p-6 pb-8 shadow-2xl animate-in slide-in-from-bottom max-w-md mx-auto w-full flex flex-col max-h-[85vh]">
-              
-              <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold mb-6 w-fit ${actionInfo.bg} ${actionInfo.color}`}>
-                <CheckCircle2 className="h-4 w-4" /> {editingTxId ? 'Edit Record:' : ''} {actionInfo.title}
+        {mounted && createPortal(
+          <AnimatePresence>
+            {showModal && (
+              <div className="fixed inset-0 z-[9999] flex flex-col justify-end">
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" 
+                  onClick={() => setShowModal(false)} 
+                />
+                <motion.div 
+                  initial={{ y: '100%' }}
+                  animate={{ y: 0 }}
+                  exit={{ y: '100%' }}
+                  transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+                  className="relative bg-white rounded-t-3xl p-6 pb-8 shadow-2xl max-w-md mx-auto w-full flex flex-col max-h-[85vh]"
+                >
+                  <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold mb-6 w-fit ${actionInfo.bg} ${actionInfo.color}`}>
+                    <CheckCircle2 className="h-4 w-4" /> {editingTxId ? 'Edit Record:' : ''} {actionInfo.title}
+                  </div>
+
+                  <form onSubmit={handleSaveTransaction} className="flex flex-col flex-1 overflow-hidden">
+                    <div className="space-y-4 overflow-y-auto px-1 pb-4 flex-1">
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Amount (৳)</label>
+                        <input
+                          type="number" required min="0" step="0.01" value={amount}
+                          onChange={(e) => setAmount(e.target.value)}
+                          className="w-full h-14 px-4 text-xl font-bold rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-slate-900 bg-white placeholder:text-slate-400"
+                          placeholder="0.00"
+                        />
+                      </div>
+
+                      <CustomDropdown label="Payment Method" options={methods} value={method} onChange={setMethod} onAdd={handleAddMethod} addLabel="Add new method" />
+
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Remarks / Reason</label>
+                        <input
+                          type="text" value={description}
+                          onChange={(e) => setDescription(e.target.value)}
+                          className="w-full h-14 px-4 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-slate-900 bg-white placeholder:text-slate-400"
+                          placeholder="e.g. For medical bills"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Date</label>
+                        <input
+                          type="date" required value={date}
+                          onChange={(e) => setDate(e.target.value)}
+                          className="w-full h-14 px-4 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-slate-900 bg-white"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="pt-2 mt-auto shrink-0 bg-white">
+                      <button type="submit" disabled={isSaving || !amount || !method} className="w-full h-14 bg-blue-600 text-white rounded-xl font-medium flex items-center justify-center hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                        {isSaving ? 'Saving...' : editingTxId ? 'Update Record' : 'Confirm Action'}
+                      </button>
+                    </div>
+                  </form>
+                </motion.div>
               </div>
-
-              <form onSubmit={handleSaveTransaction} className="flex flex-col flex-1 overflow-hidden">
-                <div className="space-y-4 overflow-y-auto px-1 pb-4 flex-1">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Amount (৳)</label>
-                    <input
-                      type="number" required min="0" step="0.01" value={amount}
-                      onChange={(e) => setAmount(e.target.value)}
-                      className="w-full h-14 px-4 text-xl font-bold rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-                      placeholder="0.00"
-                    />
-                  </div>
-
-                  <CustomDropdown label="Payment Method" options={methods} value={method} onChange={setMethod} onAdd={handleAddMethod} addLabel="Add new method" />
-
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Remarks / Reason</label>
-                    <input
-                      type="text" value={description}
-                      onChange={(e) => setDescription(e.target.value)}
-                      className="w-full h-14 px-4 bg-white rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 transition-all"
-                      placeholder="e.g. For medical bills"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 mb-1.5">Date</label>
-                    <input
-                      type="date" required value={date}
-                      onChange={(e) => setDate(e.target.value)}
-                      className="w-full h-14 px-4 bg-white rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 transition-all"
-                    />
-                  </div>
-                </div>
-
-                <div className="pt-2 mt-auto shrink-0 bg-white">
-                  <button type="submit" disabled={isSaving || !amount || !method} className="w-full h-14 bg-blue-600 text-white rounded-xl font-medium flex items-center justify-center hover:bg-blue-700 disabled:opacity-50 transition-colors">
-                    {isSaving ? 'Saving...' : editingTxId ? 'Update Record' : 'Confirm Action'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>,
+            )}
+          </AnimatePresence>,
           document.body
         )}
       </div>
