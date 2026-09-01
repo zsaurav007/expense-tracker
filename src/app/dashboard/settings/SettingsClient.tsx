@@ -9,6 +9,14 @@ import {
   Database, Download, AlertTriangle, UploadCloud, ShieldAlert, CheckCircle2 
 } from 'lucide-react';
 
+// --- TYPESCRIPT INTERFACES ---
+export interface UserData {
+  username?: string;
+  fullName?: string;
+  isGodMode?: boolean;
+  [key: string]: any;
+}
+
 // --- ANIMATION VARIANTS ---
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -20,7 +28,7 @@ const itemVariants = {
   show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } }
 };
 
-export default function SettingsClient({ user }: { user: any }) {
+export default function SettingsClient({ user }: { user: UserData }) {
   const router = useRouter();
   const [mounted, setMounted] = useState(false);
   
@@ -35,7 +43,7 @@ export default function SettingsClient({ user }: { user: any }) {
   // New Data Management States
   const [activeModal, setActiveModal] = useState<'wipe' | 'restore' | null>(null);
   const [wipeStep, setWipeStep] = useState<1 | 2>(1);
-  const [modalUsername, setModalUsername] = useState(user.username || '');
+  const [modalUsername, setModalUsername] = useState(user?.username || '');
   const [modalPassword, setModalPassword] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -55,11 +63,15 @@ export default function SettingsClient({ user }: { user: any }) {
         body: JSON.stringify({ oldPassword, newPassword }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) throw new Error(data.error || 'Failed to update password');
       setSuccess('Password updated successfully!');
       setOldPassword(''); setNewPassword('');
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('An unexpected error occurred');
+      }
     } finally {
       setIsUpdating(false);
     }
@@ -87,39 +99,46 @@ export default function SettingsClient({ user }: { user: any }) {
     setModalError('');
     setIsProcessing(true);
 
-    if (wipeStep === 1) {
-      const res = await fetch('/api/settings/data', {
-        method: 'POST',
-        body: JSON.stringify({ username: modalUsername, password: modalPassword })
-      });
-      const data = await res.json();
-
-      if (res.ok) {
-        const blob = new Blob([JSON.stringify(data.backup, null, 2)], { type: 'application/json' });
-        const link = document.createElement("a");
-        link.href = URL.createObjectURL(blob);
-        link.download = `Ledger_Backup_${new Date().toISOString().split('T')[0]}.json`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        setWipeStep(2);
-      } else {
-        setModalError(data.error || 'Verification failed');
-      }
-    } else if (wipeStep === 2) {
-      const res = await fetch('/api/settings/data', {
-        method: 'DELETE',
-        body: JSON.stringify({ username: modalUsername, password: modalPassword })
-      });
-      if (res.ok) {
-        setModalSuccess('All data has been permanently deleted.');
-        setTimeout(closeModal, 2000);
-      } else {
+    try {
+      if (wipeStep === 1) {
+        const res = await fetch('/api/settings/data', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: modalUsername, password: modalPassword })
+        });
         const data = await res.json();
-        setModalError(data.error || 'Failed to delete data');
+
+        if (res.ok) {
+          const blob = new Blob([JSON.stringify(data.backup, null, 2)], { type: 'application/json' });
+          const link = document.createElement("a");
+          link.href = URL.createObjectURL(blob);
+          link.download = `Ledger_Backup_${new Date().toISOString().split('T')[0]}.json`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          setWipeStep(2);
+        } else {
+          setModalError(data.error || 'Verification failed');
+        }
+      } else if (wipeStep === 2) {
+        const res = await fetch('/api/settings/data', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: modalUsername, password: modalPassword })
+        });
+        if (res.ok) {
+          setModalSuccess('All data has been permanently deleted.');
+          setTimeout(closeModal, 2000);
+        } else {
+          const data = await res.json();
+          setModalError(data.error || 'Failed to delete data');
+        }
       }
+    } catch (err: unknown) {
+      setModalError('An unexpected error occurred');
+    } finally {
+      setIsProcessing(false);
     }
-    setIsProcessing(false);
   };
 
   const handleRestore = async (e: React.FormEvent) => {
@@ -128,13 +147,18 @@ export default function SettingsClient({ user }: { user: any }) {
     setModalError(''); setIsProcessing(true);
 
     const reader = new FileReader();
-    reader.onload = async (event) => {
+    reader.onload = async (event: ProgressEvent<FileReader>) => {
       try {
-        const payload = JSON.parse(event.target?.result as string);
+        const result = event.target?.result;
+        if (typeof result !== 'string') throw new Error('Invalid file format');
+        
+        const payload = JSON.parse(result);
         const res = await fetch('/api/settings/data', {
           method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username: modalUsername, password: modalPassword, payload })
         });
+        
         if (res.ok) {
           setModalSuccess('Data restored successfully!');
           setTimeout(() => { closeModal(); window.location.reload(); }, 2000);
@@ -142,11 +166,18 @@ export default function SettingsClient({ user }: { user: any }) {
           const data = await res.json();
           setModalError(data.error || 'Restore failed');
         }
-      } catch (err) {
-        setModalError('Invalid JSON backup file');
+      } catch (err: unknown) {
+        setModalError('Invalid JSON backup file or network error');
+      } finally {
+        setIsProcessing(false);
       }
+    };
+    
+    reader.onerror = () => {
+      setModalError('Failed to read the file');
       setIsProcessing(false);
     };
+
     reader.readAsText(file);
   };
 

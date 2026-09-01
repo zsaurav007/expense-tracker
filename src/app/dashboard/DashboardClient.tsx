@@ -6,10 +6,25 @@ import { useRouter } from 'next/navigation';
 import { motion } from 'framer-motion';
 import { 
   Bell, ArrowUpRight, ArrowDownRight, Wallet, 
-  HandCoins, History, ChevronRight, Activity, Users, Download, FileSpreadsheet, Printer, LogOut 
+  HandCoins, History, Activity, Users, Download, FileSpreadsheet, Printer, LogOut 
 } from 'lucide-react';
 import DashboardCharts from '@/components/DashboardCharts';
 import CustomDropdown from '@/components/CustomDropdown';
+
+// --- TYPESCRIPT INTERFACES ---
+export interface Transaction {
+  id: string | number;
+  amount: number | string;
+  type: string;
+  date: string;
+  person_id?: string | null;
+  people_profiles?: { name: string } | null;
+  expense_profiles?: { name: string } | null;
+  source_or_method?: string;
+  description?: string;
+  transaction_method?: string;
+  [key: string]: any;
+}
 
 // --- ANIMATION CHOREOGRAPHY VARIANTS ---
 const containerVariants = {
@@ -31,7 +46,7 @@ export default function DashboardClient({
   isGodMode 
 }: { 
   sessionName: string; 
-  transactions: any[]; 
+  transactions: Transaction[]; 
   isGodMode?: boolean;
 }) {
   const router = useRouter();
@@ -147,7 +162,7 @@ export default function DashboardClient({
   });
 
   const categoryData = Object.entries(categoryMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
-  const chartLabel = timeOptions.find(o => o.value === chartFilter)?.label;
+  const chartLabel = timeOptions.find(o => o.value === chartFilter)?.label || 'This Month';
 
   // --- REPORT FILTERING ---
   const reportTxs = transactions.filter(t => {
@@ -182,10 +197,10 @@ export default function DashboardClient({
     csv += "SL,Date,Category/Person,Type,Remarks,Method,Amount\n";
     
     reportTxs.forEach((tx, i) => {
-      const name = tx.expense_profiles?.name || tx.people_profiles?.name || tx.source_or_method;
+      const name = tx.expense_profiles?.name || tx.people_profiles?.name || tx.source_or_method || 'Unknown';
       const remarks = `"${(tx.description || '').replace(/"/g, '""')}"`;
       const amtPrefix = ['EXPENSE', 'LEND', 'BORROW_REPAYMENT'].includes(tx.type) ? '-' : '+';
-      csv += `${i + 1},${new Date(tx.date).toLocaleDateString()},"${name}",${formatType(tx.type)},${remarks},${tx.transaction_method},${amtPrefix}${tx.amount}\n`;
+      csv += `${i + 1},${new Date(tx.date).toLocaleDateString()},"${name}",${formatType(tx.type)},${remarks},${tx.transaction_method || ''},${amtPrefix}${tx.amount}\n`;
     });
 
     csv += `\n,,,,,Total Income,${repIncome}\n,,,,,Total Expense,-${repExpense}\n,,,,,Money Out (Loans/Payments),-${repLend}\n,,,,,Money In (Loans/Received),+${repBorrow}\n`;
@@ -243,7 +258,6 @@ export default function DashboardClient({
         </motion.header>
 
         {/* --- STAGGERED CONTENT CHOREOGRAPHY --- */}
-        {/* FIX: ADDED pb-36 to guarantee scroll space for dropdowns! */}
         <motion.div 
           variants={containerVariants}
           initial="hidden"
@@ -342,16 +356,46 @@ export default function DashboardClient({
             <div className="space-y-3">
               {recentTransactions.length === 0 ? <p className="text-center text-slate-400 py-6 bg-white rounded-2xl border border-dashed border-slate-200">No recent activity.</p> :
                 recentTransactions.map((tx) => {
-                  let Icon = ArrowDownRight, colorClass = 'text-green-600', bgClass = 'bg-green-50 border-green-100', isPositive = true, route = '/dashboard';
-                  let displayName = tx.source_or_method;
+                  let Icon: any = ArrowDownRight;
+                  let colorClass = 'text-green-600';
+                  let bgClass = 'bg-green-50 border-green-100';
+                  let isPositive = true;
+                  let route = '/dashboard';
+                  let displayName = tx.source_or_method || 'Unknown';
 
-                  if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT'].includes(tx.type)) { colorClass = 'text-red-600'; bgClass = 'bg-red-50 border-red-100'; isPositive = false; }
-                  if (tx.type === 'EXPENSE') { Icon = ArrowUpRight; displayName = tx.expense_profiles?.name || tx.source_or_method; route = '/dashboard/expense'; } 
-                  else if (tx.type === 'INCOME') { route = '/dashboard/income'; } 
-                  else if (tx.type === 'LEND') { Icon = ArrowUpRight; displayName = `Loan to ${tx.people_profiles?.name}`; route = `/dashboard/ledger/${tx.person_id}`; } 
-                  else if (tx.type === 'BORROW') { displayName = `Borrowed from ${tx.people_profiles?.name}`; route = `/dashboard/ledger/${tx.person_id}`; } 
-                  else if (tx.type === 'LEND_REPAYMENT') { Icon = HandCoins; displayName = `Received from ${tx.people_profiles?.name}`; route = `/dashboard/ledger/${tx.person_id}`; } 
-                  else if (tx.type === 'BORROW_REPAYMENT') { Icon = Wallet; displayName = `Paid back ${tx.people_profiles?.name}`; route = `/dashboard/ledger/${tx.person_id}`; }
+                  if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT'].includes(tx.type)) { 
+                    colorClass = 'text-red-600'; 
+                    bgClass = 'bg-red-50 border-red-100'; 
+                    isPositive = false; 
+                  }
+                  
+                  if (tx.type === 'EXPENSE') { 
+                    Icon = ArrowUpRight; 
+                    displayName = tx.expense_profiles?.name || tx.source_or_method || 'Expense'; 
+                    route = '/dashboard/expense'; 
+                  } 
+                  else if (tx.type === 'INCOME') { 
+                    route = '/dashboard/income'; 
+                  } 
+                  else if (tx.type === 'LEND') { 
+                    Icon = ArrowUpRight; 
+                    displayName = `Loan to ${tx.people_profiles?.name || 'Unknown'}`; 
+                    route = `/dashboard/ledger/${tx.person_id}`; 
+                  } 
+                  else if (tx.type === 'BORROW') { 
+                    displayName = `Borrowed from ${tx.people_profiles?.name || 'Unknown'}`; 
+                    route = `/dashboard/ledger/${tx.person_id}`; 
+                  } 
+                  else if (tx.type === 'LEND_REPAYMENT') { 
+                    Icon = HandCoins; 
+                    displayName = `Received from ${tx.people_profiles?.name || 'Unknown'}`; 
+                    route = `/dashboard/ledger/${tx.person_id}`; 
+                  } 
+                  else if (tx.type === 'BORROW_REPAYMENT') { 
+                    Icon = Wallet; 
+                    displayName = `Paid back ${tx.people_profiles?.name || 'Unknown'}`; 
+                    route = `/dashboard/ledger/${tx.person_id}`; 
+                  }
 
                   return (
                     <Link key={tx.id} href={route} className="flex items-center justify-between p-4 bg-white rounded-xl border border-slate-100 shadow-sm active:bg-slate-50 transition-colors">
@@ -359,7 +403,7 @@ export default function DashboardClient({
                         <div className={`h-10 w-10 rounded-full flex items-center justify-center border shrink-0 ${bgClass}`}><Icon className={`h-5 w-5 ${colorClass}`} /></div>
                         <div className="flex-1 min-w-0">
                           <p className="font-semibold text-slate-900 leading-tight break-words">{displayName}</p>
-                          <p className="text-xs text-slate-500 mt-1 break-words">{new Date(tx.date).toLocaleDateString()} • {tx.transaction_method}</p>
+                          <p className="text-xs text-slate-500 mt-1 break-words">{new Date(tx.date).toLocaleDateString()} • {tx.transaction_method || 'Unknown'}</p>
                         </div>
                       </div>
                       <p className={`font-bold shrink-0 whitespace-nowrap pl-2 ${colorClass}`}>{isPositive ? '+' : '-'}৳{Number(tx.amount).toLocaleString()}</p>
@@ -413,7 +457,7 @@ export default function DashboardClient({
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold text-slate-900 mb-2">Comprehensive Financial Report</h1>
           <p className="text-sm text-slate-500 mt-1">Generated on: {new Date().toLocaleDateString()}</p>
-          <p className="text-sm font-bold text-blue-600 mt-1 uppercase">Filter: {reportOptions.find(o => o.value === reportFilter)?.label} {reportFilter === 'custom' && `(${customStart} to ${customEnd})`}</p>
+          <p className="text-sm font-bold text-blue-600 mt-1 uppercase">Filter: {reportOptions.find(o => o.value === reportFilter)?.label || ''} {reportFilter === 'custom' && `(${customStart} to ${customEnd})`}</p>
         </div>
         
         <table className="w-full border-collapse border border-slate-300 text-sm mb-6 text-left table-auto">
@@ -430,7 +474,7 @@ export default function DashboardClient({
           </thead>
           <tbody>
             {reportTxs.map((tx, index) => {
-              const name = tx.expense_profiles?.name || tx.people_profiles?.name || tx.source_or_method;
+              const name = tx.expense_profiles?.name || tx.people_profiles?.name || tx.source_or_method || 'Unknown';
               const isOut = ['EXPENSE', 'LEND', 'BORROW_REPAYMENT'].includes(tx.type);
               return (
                 <tr key={tx.id} className="hover:bg-slate-50 break-inside-avoid">

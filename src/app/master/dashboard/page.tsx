@@ -67,6 +67,7 @@ export default function MasterDashboard() {
     };
 
     checkAuthAndFetchUsers();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
   const fetchUsers = async () => {
@@ -76,7 +77,7 @@ export default function MasterDashboard() {
       .order('created_at', { ascending: false });
 
     if (!error && data) {
-      setAppUsers(data);
+      setAppUsers(data as AppUser[]);
     }
   };
 
@@ -101,8 +102,12 @@ export default function MasterDashboard() {
       setUsername('');
       setPassword('');
       fetchUsers();
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError(String(err));
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -138,8 +143,12 @@ export default function MasterDashboard() {
         setResetModalUser(null);
         setResetSuccess('');
       }, 1500);
-    } catch (err: any) {
-      setResetError(err.message);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setResetError(err.message);
+      } else {
+        setResetError(String(err));
+      }
     } finally {
       setIsResetting(false);
     }
@@ -166,8 +175,12 @@ export default function MasterDashboard() {
       }
 
       window.location.href = '/dashboard';
-    } catch (err: any) {
-      alert(err.message);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        alert(err.message);
+      } else {
+        alert(String(err));
+      }
       setActiveGodModeId(null);
     }
   };
