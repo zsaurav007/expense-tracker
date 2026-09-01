@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { 
   UserPlus, Users, LogOut, Key, Shield, UserCircle, 
   Activity, Clock, ChevronRight, ShieldCheck, X 
@@ -16,12 +16,13 @@ type AppUser = {
   created_at: string;
 };
 
-const containerVariants = {
+// FIX: Added 'Variants' type from framer-motion to prevent TypeScript from widening 'type: "spring"' to a generic string.
+const containerVariants: Variants = {
   hidden: { opacity: 0 },
   show: { opacity: 1, transition: { staggerChildren: 0.1 } }
 };
 
-const itemVariants = {
+const itemVariants: Variants = {
   hidden: { opacity: 0, y: 15 },
   show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } }
 };

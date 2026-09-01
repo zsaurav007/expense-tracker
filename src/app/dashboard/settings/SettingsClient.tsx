@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
-import { motion } from 'framer-motion';
+import { motion, Variants } from 'framer-motion';
 import { 
   LogOut, Key, ShieldCheck, UserCircle, 
   Database, Download, AlertTriangle, UploadCloud, ShieldAlert, CheckCircle2 
@@ -18,14 +18,19 @@ export interface UserData {
 }
 
 // --- ANIMATION VARIANTS ---
-const containerVariants = {
+// FIX: Added 'Variants' type and 'as const' to resolve Framer Motion TypeScript errors
+const containerVariants: Variants = {
   hidden: { opacity: 0 },
   show: { opacity: 1, transition: { staggerChildren: 0.1 } }
 };
 
-const itemVariants = {
+const itemVariants: Variants = {
   hidden: { opacity: 0, y: 20 },
-  show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } }
+  show: { 
+    opacity: 1, 
+    y: 0, 
+    transition: { type: 'spring' as const, stiffness: 300, damping: 24 } 
+  }
 };
 
 export default function SettingsClient({ user }: { user: UserData }) {
