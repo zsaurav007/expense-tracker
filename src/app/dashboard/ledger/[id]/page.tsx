@@ -33,14 +33,30 @@ interface DisplayTransaction extends Transaction {
   runningBalanceAmt: number;
 }
 
-// --- UTILITY: FORMAT DATE AS DD/MM/YYYY ---
+// --- UTILITIES ---
+// Safely formats date to strictly DD/MM/YYYY
 const formatDate = (dateInput: string | Date): string => {
+  if (!dateInput) return '';
+  if (typeof dateInput === 'string' && dateInput.includes('-')) {
+    const parts = dateInput.split('T')[0].split('-');
+    if (parts.length === 3) {
+      const [year, month, day] = parts;
+      return `${day}/${month}/${year}`;
+    }
+  }
   const d = new Date(dateInput);
   if (isNaN(d.getTime())) return '';
   const day = String(d.getDate()).padStart(2, '0');
   const month = String(d.getMonth() + 1).padStart(2, '0');
   const year = d.getFullYear();
   return `${day}/${month}/${year}`;
+};
+
+// Gets precise local date to prevent timezone offset bugs
+const getLocalToday = () => {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().split('T')[0];
 };
 
 // --- FRAMER MOTION VARIANTS ---
@@ -70,13 +86,13 @@ export default function PersonLedgerPage() {
   const [editingTxId, setEditingTxId] = useState<string | null>(null);
   const [txType, setTxType] = useState<TxType>('LEND');
   const [amount, setAmount] = useState('');
-  const [originalAmount, setOriginalAmount] = useState(0); // Tracks amount for edits
+  const [originalAmount, setOriginalAmount] = useState(0); 
   const [method, setMethod] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]); // HTML input requires yyyy-mm-dd
+  
+  const todayDate = getLocalToday();
+  const [date, setDate] = useState(todayDate); 
   const [description, setDescription] = useState('');
   const [isSaving, setIsSaving] = useState(false);
-  
-  const todayDate = new Date().toISOString().split('T')[0]; // Current date limit
   
   const [methods, setMethods] = useState([
     { label: 'Cash', value: 'Cash' }, { label: 'Bank', value: 'Bank' },
@@ -122,7 +138,7 @@ export default function PersonLedgerPage() {
     setAmount(tx.amount.toString());
     setOriginalAmount(Number(tx.amount));
     setMethod(tx.transaction_method);
-    setDate(tx.date); // Keep yyyy-mm-dd for the input field value
+    setDate(tx.date); 
     setDescription((tx.description || '').replace('(Edited)', '').trim());
     setShowModal(true);
   };
@@ -416,6 +432,7 @@ export default function PersonLedgerPage() {
                               </p>
                               <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`} />
                             </div>
+                            {/* FIX: Applied the strict formatDate() here for the UI cards */}
                             <p className="text-xs text-slate-500 mt-0.5">{formatDate(tx.date)}</p>
                           </div>
                         </div>
@@ -516,7 +533,7 @@ export default function PersonLedgerPage() {
                         <label className="block text-sm font-medium text-slate-700 mb-1.5">Date</label>
                         <input
                           type="date" required 
-                          max={todayDate}
+                          max={todayDate} // FIX: Prevents future date selection globally
                           value={date}
                           onChange={(e) => setDate(e.target.value)}
                           className="w-full h-14 px-4 bg-white rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 transition-all"
@@ -552,7 +569,7 @@ export default function PersonLedgerPage() {
         )}
       </div>
 
-      {/* --- PRINTABLE PDF REPORT (Visible ONLY during print) --- */}
+      {/* --- PRINTABLE PDF REPORT --- */}
       <div className="hidden print:block print-wrapper bg-white text-black font-sans min-h-screen pt-4">
         <div className="text-center mb-6">
           <h1 className="text-3xl font-bold text-slate-900 mb-2">Ledger Report (খতিয়ান রিপোর্ট)</h1>
@@ -577,6 +594,7 @@ export default function PersonLedgerPage() {
             {chronologicalTxs.map((row) => (
               <tr key={row.index} className="hover:bg-slate-50 break-inside-avoid">
                 <td className="border border-slate-300 px-4 py-3 text-center">{row.index + 1}</td>
+                {/* APPLIED formatDate HERE */}
                 <td className="border border-slate-300 px-4 py-3 whitespace-nowrap">{formatDate(row.date)}</td>
                 <td className="border border-slate-300 px-4 py-3 font-medium whitespace-nowrap">{row.displayType}</td>
                 <td className="border border-slate-300 px-4 py-3 break-words min-w-[150px]">{row.description}</td>
@@ -590,7 +608,6 @@ export default function PersonLedgerPage() {
         </table>
         
         <div className="flex justify-end mt-6 break-inside-avoid">
-          {/* Summary Box with Fixed Min Width to prevent squishing */}
           <div className="min-w-[450px] bg-slate-50 border border-slate-200 rounded-lg p-5 shadow-sm">
             <div className="flex justify-between mb-3 text-sm text-slate-600">
               <span>Overall Taken (মোট গ্রহণ):</span>
@@ -609,7 +626,6 @@ export default function PersonLedgerPage() {
           </div>
         </div>
       </div>
-      
     </div>
   );
 }
