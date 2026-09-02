@@ -33,6 +33,16 @@ interface DisplayTransaction extends Transaction {
   runningBalanceAmt: number;
 }
 
+// --- UTILITY: FORMAT DATE AS DD/MM/YYYY ---
+const formatDate = (dateInput: string | Date): string => {
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return '';
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`;
+};
+
 // --- FRAMER MOTION VARIANTS ---
 const containerVariants: Variants = {
   hidden: { opacity: 0 },
@@ -62,7 +72,7 @@ export default function PersonLedgerPage() {
   const [amount, setAmount] = useState('');
   const [originalAmount, setOriginalAmount] = useState(0); // Tracks amount for edits
   const [method, setMethod] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [date, setDate] = useState(new Date().toISOString().split('T')[0]); // HTML input requires yyyy-mm-dd
   const [description, setDescription] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   
@@ -112,7 +122,7 @@ export default function PersonLedgerPage() {
     setAmount(tx.amount.toString());
     setOriginalAmount(Number(tx.amount));
     setMethod(tx.transaction_method);
-    setDate(tx.date);
+    setDate(tx.date); // Keep yyyy-mm-dd for the input field value
     setDescription((tx.description || '').replace('(Edited)', '').trim());
     setShowModal(true);
   };
@@ -231,13 +241,13 @@ export default function PersonLedgerPage() {
     if (!person || transactions.length === 0) return;
     
     let csvContent = `Ledger Report For (খতিয়ান রিপোর্ট):,${person.name}\n`;
-    csvContent += `Generated On (তারিখ):,${new Date().toLocaleDateString()}\n\n`;
+    csvContent += `Generated On (তারিখ):,${formatDate(new Date())}\n\n`;
 
     csvContent += "SL (ক্রমিক),Date (তারিখ),Type (ধরন),Remarks (মন্তব্য),Method (মাধ্যম),Taken (গ্রহণ),Given (প্রদান),Balance (জের)\n";
     
     chronologicalTxs.forEach(row => {
       const safeRemarks = `"${(row.description || '').replace(/"/g, '""')}"`;
-      csvContent += `${row.index + 1},${new Date(row.date).toLocaleDateString()},"${row.displayType}",${safeRemarks},${row.transaction_method},${row.taken},${row.given},"${row.fullBalanceText}"\n`;
+      csvContent += `${row.index + 1},${formatDate(row.date)},"${row.displayType}",${safeRemarks},${row.transaction_method},${row.taken},${row.given},"${row.fullBalanceText}"\n`;
     });
 
     csvContent += `\n,,,,,Overall Taken (মোট গ্রহণ),Overall Given (মোট প্রদান),Adjusted Balance (সমন্বয়কৃত জের)\n`;
@@ -406,7 +416,7 @@ export default function PersonLedgerPage() {
                               </p>
                               <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`} />
                             </div>
-                            <p className="text-xs text-slate-500 mt-0.5">{new Date(tx.date).toLocaleDateString()}</p>
+                            <p className="text-xs text-slate-500 mt-0.5">{formatDate(tx.date)}</p>
                           </div>
                         </div>
                         
@@ -547,7 +557,7 @@ export default function PersonLedgerPage() {
         <div className="text-center mb-6">
           <h1 className="text-3xl font-bold text-slate-900 mb-2">Ledger Report (খতিয়ান রিপোর্ট)</h1>
           <h2 className="text-xl text-slate-700 font-medium">Account: {person.name}</h2>
-          <p className="text-sm text-slate-500 mt-1">Generated on: {new Date().toLocaleDateString()}</p>
+          <p className="text-sm text-slate-500 mt-1">Generated on: {formatDate(new Date())}</p>
         </div>
         
         <table className="w-full border-collapse border border-slate-300 text-sm mb-6 text-left table-auto">
@@ -567,7 +577,7 @@ export default function PersonLedgerPage() {
             {chronologicalTxs.map((row) => (
               <tr key={row.index} className="hover:bg-slate-50 break-inside-avoid">
                 <td className="border border-slate-300 px-4 py-3 text-center">{row.index + 1}</td>
-                <td className="border border-slate-300 px-4 py-3 whitespace-nowrap">{new Date(row.date).toLocaleDateString()}</td>
+                <td className="border border-slate-300 px-4 py-3 whitespace-nowrap">{formatDate(row.date)}</td>
                 <td className="border border-slate-300 px-4 py-3 font-medium whitespace-nowrap">{row.displayType}</td>
                 <td className="border border-slate-300 px-4 py-3 break-words min-w-[150px]">{row.description}</td>
                 <td className="border border-slate-300 px-4 py-3 whitespace-nowrap">{row.transaction_method}</td>
