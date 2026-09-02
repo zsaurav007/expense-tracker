@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase';
 import { getSession } from '@/lib/auth';
-import bcrypt from 'bcrypt';
 
 // --- GET: Fetches the specific expense profile and its filtered transactions ---
 export async function GET(
@@ -69,7 +68,7 @@ export async function GET(
   }
 }
 
-// --- PUT: Edits the Expense Profile name (Password Protected) ---
+// --- PUT: Edits the Expense Profile name ---
 export async function PUT(
   request: Request, 
   { params }: { params: Promise<{ id: string }> }
@@ -80,18 +79,12 @@ export async function PUT(
 
     const resolvedParams = await params;
     const id = resolvedParams.id;
-    const { name, password } = await request.json();
+    const { name } = await request.json();
+
+    if (!name) return NextResponse.json({ error: 'Name is required' }, { status: 400 });
 
     const supabase = getServiceSupabase();
     
-    // Verify Password against correct 'app_users' table
-    const { data: user, error: userError } = await supabase.from('app_users').select('*').eq('id', session.userId).single();
-    if (userError || !user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    
-    const hash = user.password_hash || user.password;
-    const isValid = await bcrypt.compare(password, hash);
-    if (!isValid) return NextResponse.json({ error: 'Incorrect password' }, { status: 403 });
-
     // Update Profile Name
     const { error } = await supabase.from('expense_profiles')
       .update({ name })
@@ -106,7 +99,7 @@ export async function PUT(
   }
 }
 
-// --- DELETE: Deletes the Expense Profile and its transactions (Password Protected) ---
+// --- DELETE: Deletes the Expense Profile and its transactions ---
 export async function DELETE(
   request: Request, 
   { params }: { params: Promise<{ id: string }> }
@@ -117,23 +110,21 @@ export async function DELETE(
 
     const resolvedParams = await params;
     const id = resolvedParams.id;
-    const { password } = await request.json();
 
     const supabase = getServiceSupabase();
     
-    // Verify Password against correct 'app_users' table
-    const { data: user, error: userError } = await supabase.from('app_users').select('*').eq('id', session.userId).single();
-    if (userError || !user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
-    
-    const hash = user.password_hash || user.password;
-    const isValid = await bcrypt.compare(password, hash);
-    if (!isValid) return NextResponse.json({ error: 'Incorrect password' }, { status: 403 });
-
     // First delete associated expense transactions
-    await supabase.from('transactions').delete().eq('expense_profile_id', id).eq('user_id', session.userId);
+    await supabase.from('transactions')
+      .delete()
+      .eq('expense_profile_id', id)
+      .eq('user_id', session.userId);
 
     // Then delete the profile
-    const { error } = await supabase.from('expense_profiles').delete().eq('id', id).eq('user_id', session.userId);
+    const { error } = await supabase.from('expense_profiles')
+      .delete()
+      .eq('id', id)
+      .eq('user_id', session.userId);
+      
     if (error) throw error;
 
     return NextResponse.json({ success: true });
