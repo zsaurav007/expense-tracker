@@ -6,12 +6,34 @@ import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { 
   ArrowLeft, ArrowUpRight, ArrowDownRight, CheckCircle2, 
-  Wallet, HandCoins, FileSpreadsheet, Printer, ChevronDown, ChevronUp, Edit, Trash2 
+  Wallet, HandCoins, FileSpreadsheet, Printer, ChevronDown, Edit, Trash2 
 } from 'lucide-react';
 import CustomDropdown from '@/components/CustomDropdown';
 
+// --- TYPESCRIPT INTERFACES ---
+type TxType = 'LEND' | 'BORROW' | 'LEND_REPAYMENT' | 'BORROW_REPAYMENT';
+
+interface Transaction {
+  id: string;
+  type: TxType;
+  amount: number | string;
+  date: string;
+  transaction_method: string;
+  description?: string;
+  person_id?: string;
+}
+
+interface DisplayTransaction extends Transaction {
+  index: number;
+  displayType: string;
+  given: string;
+  taken: string;
+  shortBalanceText: string;
+  fullBalanceText: string;
+  runningBalanceAmt: number;
+}
+
 // --- FRAMER MOTION VARIANTS ---
-// FIX: Added 'Variants' type and 'as const' to resolve Framer Motion TypeScript errors
 const containerVariants: Variants = {
   hidden: { opacity: 0 },
   show: { opacity: 1, transition: { staggerChildren: 0.05 } }
@@ -19,11 +41,7 @@ const containerVariants: Variants = {
 
 const itemVariants: Variants = {
   hidden: { opacity: 0, y: 15 },
-  show: { 
-    opacity: 1, 
-    y: 0, 
-    transition: { type: 'spring' as const, stiffness: 300, damping: 24 } 
-  }
+  show: { opacity: 1, y: 0, transition: { type: 'spring' as const, stiffness: 300, damping: 24 } }
 };
 
 export default function PersonLedgerPage() {
@@ -31,7 +49,7 @@ export default function PersonLedgerPage() {
   const params = useParams();
   
   const [person, setPerson] = useState<{ id: string, name: string } | null>(null);
-  const [transactions, setTransactions] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [netBalance, setNetBalance] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
@@ -40,12 +58,15 @@ export default function PersonLedgerPage() {
   // Modal & Edit State
   const [showModal, setShowModal] = useState(false);
   const [editingTxId, setEditingTxId] = useState<string | null>(null);
-  const [txType, setTxType] = useState<'LEND' | 'BORROW' | 'LEND_REPAYMENT' | 'BORROW_REPAYMENT'>('LEND');
+  const [txType, setTxType] = useState<TxType>('LEND');
   const [amount, setAmount] = useState('');
+  const [originalAmount, setOriginalAmount] = useState(0); // Tracks amount for edits
   const [method, setMethod] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [description, setDescription] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  
+  const todayDate = new Date().toISOString().split('T')[0]; // Current date limit
   
   const [methods, setMethods] = useState([
     { label: 'Cash', value: 'Cash' }, { label: 'Bank', value: 'Bank' },
@@ -74,20 +95,22 @@ export default function PersonLedgerPage() {
     setMethod(newMethod);
   };
 
-  const handleActionClick = (type: 'LEND' | 'BORROW' | 'LEND_REPAYMENT' | 'BORROW_REPAYMENT') => {
+  const handleActionClick = (type: TxType) => {
     setEditingTxId(null);
     setTxType(type);
     setAmount('');
+    setOriginalAmount(0);
     setMethod('');
     setDescription('');
-    setDate(new Date().toISOString().split('T')[0]);
+    setDate(todayDate);
     setShowModal(true);
   };
 
-  const handleEditClick = (tx: any) => {
+  const handleEditClick = (tx: Transaction) => {
     setEditingTxId(tx.id);
     setTxType(tx.type);
     setAmount(tx.amount.toString());
+    setOriginalAmount(Number(tx.amount));
     setMethod(tx.transaction_method);
     setDate(tx.date);
     setDescription((tx.description || '').replace('(Edited)', '').trim());
@@ -104,13 +127,31 @@ export default function PersonLedgerPage() {
     }
   };
 
+  // --- VALIDATION LOGIC FOR INSTALLMENTS ---
+  let maxAllowed: number | null = null;
+  if (txType === 'LEND_REPAYMENT') {
+    maxAllowed = editingTxId ? netBalance + originalAmount : netBalance;
+    maxAllowed = Number(maxAllowed.toFixed(2));
+  } else if (txType === 'BORROW_REPAYMENT') {
+    maxAllowed = editingTxId ? Math.abs(netBalance) + originalAmount : Math.abs(netBalance);
+    maxAllowed = Number(maxAllowed.toFixed(2));
+  }
+
+  const numericAmount = parseFloat(amount) || 0;
+  const isAmountExceeded = maxAllowed !== null && numericAmount > maxAllowed;
+
   const handleSaveTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isAmountExceeded) {
+      alert("Installment amount exceeds the outstanding balance!");
+      return;
+    }
+    
     setIsSaving(true);
 
     const payload = {
       type: txType,
-      amount: parseFloat(amount),
+      amount: numericAmount,
       method,
       date,
       description,
@@ -128,12 +169,15 @@ export default function PersonLedgerPage() {
 
     const res = await fetch(url, {
       method: methodType,
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     });
 
     if (res.ok) {
       setShowModal(false);
       fetchLedger(); 
+    } else {
+      alert("Failed to save transaction.");
     }
     setIsSaving(false);
   };
@@ -143,7 +187,7 @@ export default function PersonLedgerPage() {
   let totalGiven = 0;
   let totalTaken = 0;
   
-  const chronologicalTxs = [...transactions].reverse().map((tx, index) => {
+  const chronologicalTxs: DisplayTransaction[] = [...transactions].reverse().map((tx, index) => {
     let displayType = '';
     let given = '';
     let taken = '';
@@ -235,46 +279,26 @@ export default function PersonLedgerPage() {
   return (
     <div className="flex flex-col min-h-screen bg-slate-50 relative">
       
-      {/* 
-        CRITICAL PDF PRINT STYLES 
-        This aggressively overrides Next.js mobile layouts to force 100% width on A4 Landscape
-      */}
+      {/* CRITICAL PDF PRINT STYLES */}
       <style dangerouslySetInnerHTML={{__html: `
         @media print {
           @page { size: landscape; margin: 10mm; }
-          
-          /* Force everything to stretch to 100% of the paper */
           html, body, main { 
-            max-width: 100% !important; 
-            width: 100% !important; 
-            margin: 0 !important; 
-            padding: 0 !important; 
-            background: white !important;
-            -webkit-print-color-adjust: exact; 
-            print-color-adjust: exact;
+            max-width: 100% !important; width: 100% !important; 
+            margin: 0 !important; padding: 0 !important; background: white !important;
+            -webkit-print-color-adjust: exact; print-color-adjust: exact;
           }
-          
-          /* Hide the mobile navigation and UI wrappers */
           nav { display: none !important; }
           .print\\:hidden { display: none !important; }
-          
-          /* Print Wrapper strictly commands 100% width */
-          .print-wrapper { 
-            display: block !important;
-            width: 100% !important; 
-            max-width: 100% !important;
-            padding: 0 !important;
-          }
-
+          .print-wrapper { display: block !important; width: 100% !important; max-width: 100% !important; padding: 0 !important; }
           table { width: 100% !important; table-layout: auto !important; }
         }
       `}} />
 
-      {/* --- INTERACTIVE APP UI (Hidden during PDF generation) --- */}
+      {/* --- INTERACTIVE APP UI --- */}
       <div className="print:hidden">
         <motion.header 
-          initial={{ y: -20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
+          initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
           className="px-6 pt-8 pb-4 bg-white border-b border-slate-100 flex items-center gap-4 sticky top-0 z-10"
         >
           <button onClick={() => router.back()} className="p-2 -ml-2 hover:bg-slate-50 rounded-full transition-colors">
@@ -292,11 +316,7 @@ export default function PersonLedgerPage() {
           </div>
         </motion.header>
 
-        <motion.div 
-          variants={containerVariants}
-          initial="hidden"
-          animate="show"
-        >
+        <motion.div variants={containerVariants} initial="hidden" animate="show">
           <motion.div variants={itemVariants} className="p-6 pb-2">
             <div className={`p-8 rounded-3xl text-center shadow-sm border transition-colors duration-500 ${
               netBalance > 0 ? 'bg-green-600 border-green-700 text-white' : 
@@ -305,9 +325,7 @@ export default function PersonLedgerPage() {
               <p className="text-sm font-medium mb-2 opacity-90">
                 {netBalance > 0 ? `${person.name} owes you` : netBalance < 0 ? `You owe ${person.name}` : 'Accounts Settled'}
               </p>
-              <h2 className="text-5xl font-extrabold tracking-tight">
-                ৳{Math.abs(netBalance).toLocaleString()}
-              </h2>
+              <h2 className="text-5xl font-extrabold tracking-tight">৳{Math.abs(netBalance).toLocaleString()}</h2>
             </div>
           </motion.div>
 
@@ -450,49 +468,69 @@ export default function PersonLedgerPage() {
                   animate={{ y: 0 }}
                   exit={{ y: '100%' }}
                   transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-                  className="relative bg-white rounded-t-3xl p-6 pb-8 shadow-2xl max-w-md mx-auto w-full flex flex-col max-h-[85vh]"
+                  className="relative bg-white rounded-t-3xl p-6 pb-8 shadow-2xl max-w-md mx-auto w-full flex flex-col max-h-[92vh]"
                 >
                   <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold mb-6 w-fit ${actionInfo.bg} ${actionInfo.color}`}>
                     <CheckCircle2 className="h-4 w-4" /> {editingTxId ? 'Edit Record:' : ''} {actionInfo.title}
                   </div>
 
                   <form onSubmit={handleSaveTransaction} className="flex flex-col flex-1 overflow-hidden">
-                    <div className="space-y-4 overflow-y-auto px-1 pb-4 flex-1">
+                    <div className="space-y-4 overflow-y-auto px-1 pb-48 flex-1 overscroll-contain [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                       <div>
                         <label className="block text-sm font-medium text-slate-700 mb-1.5">Amount (৳)</label>
                         <input
-                          type="number" required min="0" step="0.01" value={amount}
+                          type="number" required min="0.01" step="0.01" 
+                          max={maxAllowed !== null ? maxAllowed : undefined}
+                          value={amount}
                           onChange={(e) => setAmount(e.target.value)}
-                          className="w-full h-14 px-4 text-xl font-bold rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-slate-900 bg-white placeholder:text-slate-400"
+                          className={`w-full h-14 px-4 text-xl font-bold rounded-xl border focus:outline-none focus:ring-2 transition-all text-slate-900 bg-white placeholder:text-slate-400 ${
+                            isAmountExceeded ? 'border-red-500 focus:ring-red-500' : 'border-slate-200 focus:ring-blue-500'
+                          }`}
                           placeholder="0.00"
+                        />
+                        {/* Dynamic Validation Warning Message */}
+                        {maxAllowed !== null && (
+                          <p className={`text-xs mt-1.5 font-medium ${isAmountExceeded ? 'text-red-500' : 'text-slate-500'}`}>
+                            {isAmountExceeded 
+                              ? `Cannot exceed outstanding balance (৳${maxAllowed.toLocaleString()})` 
+                              : `Maximum allowed: ৳${maxAllowed.toLocaleString()}`}
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="relative z-[60]">
+                        <CustomDropdown label="Payment Method" options={methods} value={method} onChange={setMethod} onAdd={handleAddMethod} addLabel="Add new method" />
+                      </div>
+
+                      <div className="relative z-[50]">
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Date</label>
+                        <input
+                          type="date" required 
+                          max={todayDate}
+                          value={date}
+                          onChange={(e) => setDate(e.target.value)}
+                          className="w-full h-14 px-4 bg-white rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 transition-all"
                         />
                       </div>
 
-                      <CustomDropdown label="Payment Method" options={methods} value={method} onChange={setMethod} onAdd={handleAddMethod} addLabel="Add new method" />
-
-                      <div>
+                      <div className="relative z-[40]">
                         <label className="block text-sm font-medium text-slate-700 mb-1.5">Remarks / Reason</label>
                         <input
                           type="text" value={description}
                           onChange={(e) => setDescription(e.target.value)}
-                          className="w-full h-14 px-4 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-slate-900 bg-white placeholder:text-slate-400"
+                          className="w-full h-14 px-4 bg-white rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 placeholder:text-slate-400 transition-all"
                           placeholder="e.g. For medical bills"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Date</label>
-                        <input
-                          type="date" required value={date}
-                          onChange={(e) => setDate(e.target.value)}
-                          className="w-full h-14 px-4 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-slate-900 bg-white"
                         />
                       </div>
                     </div>
 
-                    <div className="pt-2 mt-auto shrink-0 bg-white">
-                      <button type="submit" disabled={isSaving || !amount || !method} className="w-full h-14 bg-blue-600 text-white rounded-xl font-medium flex items-center justify-center hover:bg-blue-700 disabled:opacity-50 transition-colors">
-                        {isSaving ? 'Saving...' : editingTxId ? 'Update Record' : 'Confirm Action'}
+                    <div className="pt-4 mt-auto shrink-0 bg-white border-t border-slate-100">
+                      <button 
+                        type="submit" 
+                        disabled={isSaving || !amount || !method || isAmountExceeded} 
+                        className="w-full h-14 bg-blue-600 text-white rounded-xl font-medium flex items-center justify-center hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                      >
+                        {isSaving ? 'Processing...' : editingTxId ? 'Update Record' : 'Confirm Action'}
                       </button>
                     </div>
                   </form>

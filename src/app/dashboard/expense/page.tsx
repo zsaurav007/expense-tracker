@@ -54,6 +54,7 @@ export default function ExpensePage() {
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [profileId, setProfileId] = useState('');
+  const [oneTimeName, setOneTimeName] = useState(''); // Tracks the custom name for 'No Profile'
   const [method, setMethod] = useState('');
   const [description, setDescription] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -121,6 +122,7 @@ export default function ExpensePage() {
     setDescription('');
     setDate(new Date().toISOString().split('T')[0]);
     setProfileId('');
+    setOneTimeName('');
   };
 
   // --- ACTIONS ---
@@ -134,6 +136,7 @@ export default function ExpensePage() {
     setDate(tx.date);
     setDescription(tx.description || '');
     setProfileId(tx.expense_profile_id || 'NONE');
+    setOneTimeName(!tx.expense_profile_id && tx.type === 'EXPENSE' ? tx.source_or_method : '');
     setShowModal(true);
   };
 
@@ -166,7 +169,7 @@ export default function ExpensePage() {
       method, 
       date, 
       description,
-      source: profileId === 'NONE' ? 'General Expense' : expenseProfiles.find(p => p.value === profileId)?.label,
+      source: profileId === 'NONE' ? (oneTimeName.trim() || 'General Expense') : expenseProfiles.find(p => p.value === profileId)?.label,
       profileId: profileId !== 'NONE' ? profileId : null,
     };
     
@@ -323,7 +326,8 @@ export default function ExpensePage() {
                 </div>
                 
                 <form onSubmit={handleSave} className="flex flex-col flex-1 overflow-hidden">
-                  <div className="space-y-4 overflow-y-auto px-1 pb-32 flex-1 overscroll-contain">
+                  {/* Hides scrollbar completely but allows scrolling */}
+                  <div className="space-y-4 overflow-y-auto px-1 pb-24 flex-1 overscroll-contain [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Amount (৳)</label>
                       <input 
@@ -337,6 +341,25 @@ export default function ExpensePage() {
                     <div className="relative z-[60]">
                       <CustomDropdown label="Expense Ledger Profile" options={profileOptions} value={profileId} onChange={setProfileId} onAdd={handleAddProfile} addLabel="Create ledger" />
                     </div>
+
+                    <AnimatePresence>
+                      {profileId === 'NONE' && (
+                        <motion.div 
+                          initial={{ opacity: 0, height: 0, marginTop: 0 }} 
+                          animate={{ opacity: 1, height: 'auto', marginTop: 16 }} 
+                          exit={{ opacity: 0, height: 0, marginTop: 0 }} 
+                          className="relative z-[55] overflow-hidden"
+                        >
+                          <label className="block text-sm font-medium text-slate-700 mb-1.5">Expense Title (One-time)</label>
+                          <input 
+                            type="text" required 
+                            value={oneTimeName} onChange={(e) => setOneTimeName(e.target.value)} 
+                            className="w-full h-14 px-4 text-slate-900 bg-white placeholder:text-slate-400 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" 
+                            placeholder="e.g. Gold Purchase" 
+                          />
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                     
                     <div className="relative z-[50]">
                       <CustomDropdown label="Method" options={methods} value={method} onChange={setMethod} onAdd={handleAddMethod} addLabel="Add method" />
@@ -357,13 +380,17 @@ export default function ExpensePage() {
                         type="text" 
                         value={description} onChange={(e) => setDescription(e.target.value)} 
                         className="w-full h-14 px-4 text-slate-900 bg-white placeholder:text-slate-400 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" 
-                        placeholder="e.g. Electric Bill May" 
+                        placeholder="e.g. For Mother's Gift" 
                       />
                     </div>
                   </div>
 
                   <div className="pt-4 mt-auto shrink-0 bg-white border-t border-slate-100">
-                    <button type="submit" disabled={isSaving || !profileId || !method} className="w-full h-14 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                    <button 
+                      type="submit" 
+                      disabled={isSaving || !profileId || !method || (profileId === 'NONE' && !oneTimeName.trim())} 
+                      className="w-full h-14 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                    >
                       {isSaving ? 'Processing...' : editingTxId ? 'Update Record' : 'Save Expense'}
                     </button>
                   </div>
