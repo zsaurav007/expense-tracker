@@ -210,7 +210,6 @@ export default function ExpensePage() {
   const updateFundingSource = (id: string, field: 'personId' | 'amount', value: string) => {
     setFundingSources(prev => prev.map(f => {
       if (f.id === id) {
-        // If the person is changed, reset the amount to 0/empty to prevent accidental over-drafting
         if (field === 'personId' && f.personId !== value) {
           return { ...f, personId: value, amount: '' };
         }
@@ -223,12 +222,14 @@ export default function ExpensePage() {
   const totalFunded = fundingSources.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
   const isOverFunded = parseFloat(amount || '0') > 0 && totalFunded > parseFloat(amount || '0');
 
-  // Check if any selected funding source exceeds that person's specific limit
   const hasExceededPersonLimit = fundingSources.some(f => {
     if (!f.personId) return false;
     const limit = personMaxLimits[f.personId] ?? 0;
     return parseFloat(f.amount || '0') > limit;
   });
+
+  // STRICT RULE: Cannot add new source if an existing row is completely empty
+  const hasEmptySource = fundingSources.some(f => !f.personId || !f.amount);
 
   const resetForm = () => {
     setEditingTxId(null);
@@ -386,6 +387,16 @@ export default function ExpensePage() {
           }
           
           const isFunded = tx.transaction_fundings && tx.transaction_fundings.length > 0;
+          let funderNames = '';
+
+          // Find Funder Names
+          if (isFunded) {
+            const names = tx.transaction_fundings!.map(f => {
+              const p = peopleOptions.find(opt => opt.value === f.person_id);
+              return p ? p.label : 'Unknown';
+            });
+            funderNames = `Funded by: ${names.join(', ')}`;
+          }
           
           const CardContent = (
             <div className="flex items-center justify-between p-4 bg-white rounded-xl border border-slate-100 shadow-sm active:bg-slate-50 transition-colors gap-4 group">
@@ -400,6 +411,11 @@ export default function ExpensePage() {
                     {(tx.expense_profile_id || tx.person_id) && <ChevronRight className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />}
                   </div>
                   <p className="text-xs text-slate-500 mt-1 break-words leading-snug">{formatDate(tx.date)} • {subText}</p>
+                  {isFunded && (
+                    <p className="text-[11px] font-medium text-blue-600 mt-0.5 leading-snug truncate">
+                      {funderNames}
+                    </p>
+                  )}
                 </div>
               </div>
               
@@ -464,7 +480,7 @@ export default function ExpensePage() {
                   <div className="space-y-4 overflow-y-auto px-1 pb-48 flex-1 overscroll-contain [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                     
                     {/* AMOUNT */}
-                    <div className="relative z-[100]">
+                    <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Amount (৳)</label>
                       <input 
                         type="number" required min="0" step="0.01" 
@@ -475,7 +491,7 @@ export default function ExpensePage() {
                       {isOverFunded && <p className="text-xs text-red-500 mt-1.5 font-medium">Funded amount exceeds expense total!</p>}
                     </div>
                     
-                    <div className="relative z-[90]">
+                    <div>
                       <CustomDropdown label="Expense Ledger Profile" options={profileOptions} value={profileId} onChange={setProfileId} onAdd={handleAddProfile} addLabel="Create ledger" />
                     </div>
 
@@ -485,7 +501,7 @@ export default function ExpensePage() {
                           initial={{ opacity: 0, height: 0, marginTop: 0 }} 
                           animate={{ opacity: 1, height: 'auto', marginTop: 16 }} 
                           exit={{ opacity: 0, height: 0, marginTop: 0 }} 
-                          className="relative z-[85] overflow-visible"
+                          className="overflow-hidden"
                         >
                           <label className="block text-sm font-medium text-slate-700 mb-1.5">Expense Title (One-time)</label>
                           <input 
@@ -498,11 +514,11 @@ export default function ExpensePage() {
                       )}
                     </AnimatePresence>
                     
-                    <div className="relative z-[80]">
+                    <div>
                       <CustomDropdown label="Method" options={methods} value={method} onChange={setMethod} onAdd={handleAddMethod} addLabel="Add method" />
                     </div>
                     
-                    <div className="relative z-[70]">
+                    <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Date</label>
                       <input 
                         type="date" required max={todayDate}
@@ -511,7 +527,7 @@ export default function ExpensePage() {
                       />
                     </div>
                     
-                    <div className="relative z-[60]">
+                    <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Description (Optional)</label>
                       <input 
                         type="text" 
@@ -522,18 +538,23 @@ export default function ExpensePage() {
                     </div>
 
                     {/* --- FUNDING SPLIT SECTION --- */}
-                    <div className="pt-6 mt-4 border-t border-slate-100 relative z-[50]">
+                    <div className="pt-6 mt-4 border-t border-slate-100">
                       <div className="flex justify-between items-center mb-4">
                         <div>
                           <label className="block text-sm font-medium text-slate-900">Funded By (Optional)</label>
                           <p className="text-[10px] text-slate-500 mt-0.5">Split expense across loans you've taken</p>
                         </div>
-                        <button type="button" onClick={addFundingSource} className="text-xs font-bold text-blue-600 bg-blue-50 px-2.5 py-1.5 rounded-lg hover:bg-blue-100 flex items-center gap-1 transition-colors">
+                        <button 
+                          type="button" 
+                          onClick={addFundingSource} 
+                          disabled={hasEmptySource}
+                          className={`text-xs font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-colors ${hasEmptySource ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`}
+                        >
                           <Plus className="h-3.5 w-3.5"/> Add Source
                         </button>
                       </div>
 
-                      {fundingSources.map((source, index) => {
+                      {fundingSources.map((source) => {
                         const availablePeople = peopleOptions.filter(p => 
                           p.value === source.personId || !fundingSources.some(f => f.personId === p.value)
                         );
@@ -542,13 +563,9 @@ export default function ExpensePage() {
                         const isThisExceeded = maxLimitForPerson !== null && parseFloat(source.amount || '0') > maxLimitForPerson;
 
                         return (
-                          <div 
-                            key={source.id} 
-                            className="mb-3 relative" 
-                            style={{ zIndex: 50 - index }}
-                          >
-                            <div className="flex gap-2 relative">
-                              <div className="flex-1 relative" style={{ zIndex: 50 - index }}>
+                          <div key={source.id} className="mb-3">
+                            <div className="flex gap-2">
+                              <div className="flex-1">
                                 <CustomDropdown 
                                   options={availablePeople} 
                                   value={source.personId} 
@@ -556,15 +573,15 @@ export default function ExpensePage() {
                                   label="" 
                                 />
                               </div>
-                              <div className="w-1/3 shrink-0 relative z-0">
+                              <div className="w-1/3 shrink-0">
                                 <input 
                                   type="number" min="0" step="0.01" required placeholder="Amount"
                                   max={maxLimitForPerson !== null ? maxLimitForPerson : undefined}
                                   value={source.amount} onChange={(e) => updateFundingSource(source.id, 'amount', e.target.value)} 
-                                  className={`relative z-0 w-full h-14 px-3 text-sm rounded-xl border bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 transition-all ${isThisExceeded ? 'border-red-500 focus:ring-red-500' : 'border-slate-200 focus:ring-blue-500'}`}
+                                  className={`w-full h-14 px-3 text-sm rounded-xl border bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 transition-all ${isThisExceeded ? 'border-red-500 focus:ring-red-500' : 'border-slate-200 focus:ring-blue-500'}`}
                                 />
                               </div>
-                              <button type="button" onClick={() => removeFundingSource(source.id)} className="relative z-0 h-14 w-10 flex items-center justify-center text-slate-400 hover:text-red-500 bg-slate-50 rounded-xl shrink-0 transition-colors">
+                              <button type="button" onClick={() => removeFundingSource(source.id)} className="h-14 w-10 flex items-center justify-center text-slate-400 hover:text-red-500 bg-slate-50 rounded-xl shrink-0 transition-colors">
                                 <X className="h-5 w-5"/>
                               </button>
                             </div>
@@ -580,10 +597,10 @@ export default function ExpensePage() {
 
                   </div>
 
-                  <div className="pt-4 mt-auto shrink-0 bg-white border-t border-slate-100 relative z-0">
+                  <div className="pt-4 mt-auto shrink-0 bg-white border-t border-slate-100">
                     <button 
                       type="submit" 
-                      disabled={isSaving || !profileId || !method || (profileId === 'NONE' && !oneTimeName.trim()) || isOverFunded || hasExceededPersonLimit} 
+                      disabled={isSaving || !profileId || !method || (profileId === 'NONE' && !oneTimeName.trim()) || isOverFunded || hasExceededPersonLimit || hasEmptySource} 
                       className="w-full h-14 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 disabled:opacity-50 transition-colors"
                     >
                       {isSaving ? 'Processing...' : editingTxId ? 'Update Record' : 'Save Expense'}
