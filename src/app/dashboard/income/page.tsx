@@ -4,11 +4,23 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
-import { Plus, ArrowDownRight, HandCoins, ChevronRight } from 'lucide-react';
+import { Plus, ArrowDownRight, HandCoins, ChevronRight, Edit, Trash2 } from 'lucide-react';
 import CustomDropdown from '@/components/CustomDropdown';
 
+// --- TYPESCRIPT DEFINITIONS ---
+type Transaction = {
+  id: string;
+  type: string;
+  amount: number | string;
+  date: string;
+  source_or_method: string;
+  transaction_method: string;
+  description?: string;
+  person_id?: string;
+  people_profiles?: { name: string };
+};
+
 // --- FRAMER MOTION VARIANTS ---
-// FIX: Added 'Variants' type and 'as const' to resolve Framer Motion TypeScript errors
 const containerVariants: Variants = {
   hidden: { opacity: 0 },
   show: { opacity: 1, transition: { staggerChildren: 0.05 } }
@@ -24,12 +36,13 @@ const itemVariants: Variants = {
 };
 
 export default function IncomePage() {
-  const [transactions, setTransactions] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
   
-  // Modal State
+  // --- MODAL & FORM STATE ---
   const [showModal, setShowModal] = useState(false);
+  const [editingTxId, setEditingTxId] = useState<string | null>(null);
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [source, setSource] = useState('');
@@ -49,12 +62,17 @@ export default function IncomePage() {
 
   const fetchIncome = async () => {
     setIsLoading(true);
-    const res = await fetch('/api/transactions?type=INCOME,BORROW,LEND_REPAYMENT');
-    if (res.ok) {
-      const data = await res.json();
-      setTransactions(data.transactions);
+    try {
+      const res = await fetch('/api/transactions?type=INCOME,BORROW,LEND_REPAYMENT');
+      if (res.ok) {
+        const data = await res.json();
+        setTransactions(data.transactions);
+      }
+    } catch (error) {
+      console.error("Failed to fetch income", error);
+    } finally {
+      setIsLoading(false);
     }
-    setIsLoading(false);
   };
 
   useEffect(() => { 
@@ -71,19 +89,90 @@ export default function IncomePage() {
     setMethod(val);
   };
 
+  const resetForm = () => {
+    setAmount('');
+    setDescription('');
+    setSource('');
+    setMethod('');
+    setDate(new Date().toISOString().split('T')[0]);
+    setEditingTxId(null);
+  };
+
+  // --- ACTIONS ---
+  const handleEditClick = (tx: Transaction, e: React.MouseEvent) => {
+    e.preventDefault(); 
+    e.stopPropagation();
+    
+    setEditingTxId(tx.id);
+    setAmount(tx.amount.toString());
+    setSource(tx.source_or_method);
+    setMethod(tx.transaction_method);
+    setDate(tx.date);
+    setDescription(tx.description || '');
+    setShowModal(true);
+  };
+
+  const handleDeleteClick = async (id: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (!window.confirm("Are you sure you want to delete this income record?")) return;
+    
+    try {
+      const res = await fetch(`/api/transactions/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        alert("Income record deleted successfully!");
+        fetchIncome();
+      } else {
+        alert("Failed to delete the record.");
+      }
+    } catch (error) {
+      alert("An error occurred while deleting.");
+    }
+  };
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
-    const res = await fetch('/api/transactions', {
-      method: 'POST',
-      body: JSON.stringify({ type: 'INCOME', amount: parseFloat(amount), source, method, date, description }),
-    });
-    if (res.ok) {
-      setShowModal(false);
-      setAmount(''); setDescription('');
-      fetchIncome();
+    
+    const payload = { 
+      type: 'INCOME', 
+      amount: parseFloat(amount), 
+      source, 
+      method, 
+      date, 
+      description 
+    };
+
+    try {
+      let res;
+      if (editingTxId) {
+        res = await fetch(`/api/transactions/${editingTxId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } else {
+        res = await fetch('/api/transactions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      }
+
+      if (res.ok) {
+        alert(editingTxId ? "Income updated successfully!" : "Income added successfully!");
+        setShowModal(false);
+        resetForm();
+        fetchIncome();
+      } else {
+        alert("Failed to save the record.");
+      }
+    } catch (error) {
+      alert("An error occurred while saving.");
+    } finally {
+      setIsSaving(false);
     }
-    setIsSaving(false);
   };
 
   return (
@@ -94,7 +183,10 @@ export default function IncomePage() {
         className="px-6 pt-8 pb-4 bg-white border-b border-slate-100 flex justify-between items-center sticky top-0 z-10"
       >
         <h1 className="text-xl font-bold text-slate-900">Income</h1>
-        <button onClick={() => setShowModal(true)} className="flex items-center gap-1 text-blue-600 bg-blue-50 px-3 py-1.5 rounded-full text-sm font-semibold hover:bg-blue-100 transition-colors">
+        <button 
+          onClick={() => { resetForm(); setShowModal(true); }} 
+          className="flex items-center gap-1 text-blue-600 bg-blue-50 px-3 py-1.5 rounded-full text-sm font-semibold hover:bg-blue-100 transition-colors"
+        >
           <Plus className="h-4 w-4" /> Add
         </button>
       </motion.header>
@@ -122,7 +214,7 @@ export default function IncomePage() {
            }
 
            const CardContent = (
-             <div className="flex items-center justify-between p-4 bg-white rounded-xl border border-slate-100 shadow-sm active:bg-slate-50 transition-colors gap-4">
+             <div className="flex items-center justify-between p-4 bg-white rounded-xl border border-slate-100 shadow-sm active:bg-slate-50 transition-colors gap-4 group">
                <div className="flex items-center gap-3 flex-1 min-w-0">
                  <div className="h-10 w-10 bg-green-50 rounded-full flex items-center justify-center border border-green-100 shrink-0">
                    <Icon className="h-5 w-5 text-green-600" />
@@ -135,7 +227,25 @@ export default function IncomePage() {
                    <p className="text-xs text-slate-500 mt-1 break-words leading-snug">{new Date(tx.date).toLocaleDateString()} • {subText}</p>
                  </div>
                </div>
-               <p className="font-bold text-green-600 shrink-0 whitespace-nowrap">+৳{Number(tx.amount).toLocaleString()}</p>
+               
+               <div className="flex flex-col items-end gap-2 shrink-0">
+                 <p className="font-bold text-green-600 whitespace-nowrap">+৳{Number(tx.amount).toLocaleString()}</p>
+                 
+                 <div className="flex items-center gap-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                   <button 
+                     onClick={(e) => handleEditClick(tx, e)} 
+                     className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                   >
+                     <Edit className="h-4 w-4" />
+                   </button>
+                   <button 
+                     onClick={(e) => handleDeleteClick(tx.id, e)} 
+                     className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                   >
+                     <Trash2 className="h-4 w-4" />
+                   </button>
+                 </div>
+               </div>
              </div>
            );
 
@@ -165,7 +275,7 @@ export default function IncomePage() {
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" 
-                onClick={() => setShowModal(false)} 
+                onClick={() => { setShowModal(false); resetForm(); }} 
               />
               
               <motion.div 
@@ -173,21 +283,20 @@ export default function IncomePage() {
                 animate={{ y: 0 }}
                 exit={{ y: '100%' }}
                 transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-                className="relative bg-white rounded-t-3xl p-6 pb-8 shadow-2xl max-w-md mx-auto w-full flex flex-col max-h-[85vh]"
+                className="relative bg-white rounded-t-3xl p-6 pb-8 shadow-2xl max-w-md mx-auto w-full flex flex-col max-h-[90vh]"
               >
-                <h3 className="text-xl font-bold mb-4 shrink-0">Add Income</h3>
+                <h3 className="text-xl font-bold mb-4 shrink-0 flex items-center gap-2">
+                  {editingTxId ? <Edit className="h-5 w-5 text-blue-600" /> : <Plus className="h-5 w-5 text-blue-600" />}
+                  {editingTxId ? 'Edit Income' : 'Add Income'}
+                </h3>
                 
                 <form onSubmit={handleSave} className="flex flex-col flex-1 overflow-hidden">
-                  <div className="space-y-4 overflow-y-auto px-1 pb-4 flex-1">
+                  <div className="space-y-4 overflow-y-auto px-1 pb-32 flex-1 overscroll-contain">
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Amount (৳)</label>
                       <input 
-                        type="number" 
-                        required 
-                        min="0" 
-                        step="0.01" 
-                        value={amount} 
-                        onChange={(e) => setAmount(e.target.value)} 
+                        type="number" required min="0" step="0.01" 
+                        value={amount} onChange={(e) => setAmount(e.target.value)} 
                         className="w-full h-14 px-4 text-xl font-bold text-slate-900 bg-white placeholder:text-slate-400 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500" 
                         placeholder="0.00" 
                       />
@@ -204,10 +313,8 @@ export default function IncomePage() {
                     <div className="relative z-[40]">
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Date</label>
                       <input 
-                        type="date" 
-                        required 
-                        value={date} 
-                        onChange={(e) => setDate(e.target.value)} 
+                        type="date" required 
+                        value={date} onChange={(e) => setDate(e.target.value)} 
                         className="w-full h-14 px-4 bg-white text-slate-900 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500" 
                       />
                     </div>
@@ -216,17 +323,16 @@ export default function IncomePage() {
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Description (Optional)</label>
                       <input 
                         type="text" 
-                        value={description} 
-                        onChange={(e) => setDescription(e.target.value)} 
+                        value={description} onChange={(e) => setDescription(e.target.value)} 
                         className="w-full h-14 px-4 text-slate-900 bg-white placeholder:text-slate-400 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500" 
                         placeholder="e.g. Bonus" 
                       />
                     </div>
                   </div>
 
-                  <div className="pt-2 mt-auto shrink-0 bg-white">
-                    <button type="submit" disabled={isSaving || !source || !method} className="w-full h-14 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors">
-                      {isSaving ? 'Saving...' : 'Save Income'}
+                  <div className="pt-4 mt-auto shrink-0 bg-white border-t border-slate-100">
+                    <button type="submit" disabled={isSaving || !source || !method} className="w-full h-14 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                      {isSaving ? 'Processing...' : editingTxId ? 'Update Record' : 'Save Income'}
                     </button>
                   </div>
                 </form>

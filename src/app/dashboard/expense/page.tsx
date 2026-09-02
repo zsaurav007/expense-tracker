@@ -4,11 +4,30 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
-import { Plus, ArrowUpRight, FolderOpen, ChevronRight, Wallet, ArrowDownRight } from 'lucide-react';
+import { Plus, ArrowUpRight, FolderOpen, ChevronRight, Wallet, ArrowDownRight, Edit, Trash2, X } from 'lucide-react';
 import CustomDropdown from '@/components/CustomDropdown';
 
+// --- TYPESCRIPT DEFINITIONS ---
+type Transaction = {
+  id: string;
+  type: string;
+  amount: number | string;
+  date: string;
+  source_or_method: string;
+  transaction_method: string;
+  description?: string;
+  person_id?: string;
+  expense_profile_id?: string;
+  people_profiles?: { name: string };
+  expense_profiles?: { name: string };
+};
+
+type ProfileOption = {
+  label: string;
+  value: string;
+};
+
 // --- FRAMER MOTION VARIANTS ---
-// FIX: Added 'Variants' type and 'as const' to resolve Framer Motion TypeScript errors
 const containerVariants: Variants = {
   hidden: { opacity: 0 },
   show: { opacity: 1, transition: { staggerChildren: 0.05 } }
@@ -24,13 +43,14 @@ const itemVariants: Variants = {
 };
 
 export default function ExpensePage() {
-  const [transactions, setTransactions] = useState<any[]>([]);
-  const [expenseProfiles, setExpenseProfiles] = useState<any[]>([]);
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [expenseProfiles, setExpenseProfiles] = useState<ProfileOption[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
   
-  // Modal State
+  // --- MODAL & FORM STATE ---
   const [showModal, setShowModal] = useState(false);
+  const [editingTxId, setEditingTxId] = useState<string | null>(null);
   const [amount, setAmount] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [profileId, setProfileId] = useState('');
@@ -45,13 +65,24 @@ export default function ExpensePage() {
 
   const fetchData = async () => {
     setIsLoading(true);
-    const [txRes, profRes] = await Promise.all([
-      fetch('/api/transactions?type=EXPENSE,LEND,BORROW_REPAYMENT'),
-      fetch('/api/expense-profiles')
-    ]);
-    if (txRes.ok) setTransactions((await txRes.json()).transactions);
-    if (profRes.ok) setExpenseProfiles((await profRes.json()).profiles.map((p: any) => ({ label: p.name, value: p.id })));
-    setIsLoading(false);
+    try {
+      const [txRes, profRes] = await Promise.all([
+        fetch('/api/transactions?type=EXPENSE,LEND,BORROW_REPAYMENT'),
+        fetch('/api/expense-profiles')
+      ]);
+      if (txRes.ok) {
+        const data = await txRes.json();
+        setTransactions(data.transactions);
+      }
+      if (profRes.ok) {
+        const data = await profRes.json();
+        setExpenseProfiles(data.profiles.map((p: any) => ({ label: p.name, value: p.id })));
+      }
+    } catch (error) {
+      console.error("Failed to fetch data:", error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   useEffect(() => { 
@@ -65,29 +96,109 @@ export default function ExpensePage() {
   };
 
   const handleAddProfile = async (name: string) => {
-    const res = await fetch('/api/expense-profiles', { method: 'POST', body: JSON.stringify({ name }) });
-    if (res.ok) {
-      const data = await res.json();
-      setExpenseProfiles(p => [...p, { label: data.profile.name, value: data.profile.id }]);
-      setProfileId(data.profile.id);
+    try {
+      const res = await fetch('/api/expense-profiles', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }) 
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setExpenseProfiles(p => [...p, { label: data.profile.name, value: data.profile.id }]);
+        setProfileId(data.profile.id);
+      } else {
+        alert("Failed to create new ledger profile.");
+      }
+    } catch (error) {
+      alert("An error occurred while creating the ledger.");
+    }
+  };
+
+  const resetForm = () => {
+    setEditingTxId(null);
+    setAmount('');
+    setMethod('');
+    setDescription('');
+    setDate(new Date().toISOString().split('T')[0]);
+    setProfileId('');
+  };
+
+  // --- ACTIONS ---
+  const handleEditClick = (tx: Transaction, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    setEditingTxId(tx.id);
+    setAmount(tx.amount.toString());
+    setMethod(tx.transaction_method);
+    setDate(tx.date);
+    setDescription(tx.description || '');
+    setProfileId(tx.expense_profile_id || 'NONE');
+    setShowModal(true);
+  };
+
+  const handleDeleteClick = async (id: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (!window.confirm("Are you sure you want to delete this expense record?")) return;
+    
+    try {
+      const res = await fetch(`/api/transactions/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        alert("Expense record deleted successfully!");
+        fetchData();
+      } else {
+        alert("Failed to delete the record.");
+      }
+    } catch (error) {
+      alert("An error occurred while deleting.");
     }
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
+    
     const payload = {
-      type: 'EXPENSE', amount: parseFloat(amount), method, date, description,
+      type: 'EXPENSE', 
+      amount: parseFloat(amount), 
+      method, 
+      date, 
+      description,
       source: profileId === 'NONE' ? 'General Expense' : expenseProfiles.find(p => p.value === profileId)?.label,
       profileId: profileId !== 'NONE' ? profileId : null,
     };
-    const res = await fetch('/api/transactions', { method: 'POST', body: JSON.stringify(payload) });
-    if (res.ok) {
-      setShowModal(false);
-      setAmount(''); setDescription(''); setProfileId('');
-      fetchData();
+    
+    try {
+      let res;
+      if (editingTxId) {
+        res = await fetch(`/api/transactions/${editingTxId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } else {
+        res = await fetch('/api/transactions', { 
+          method: 'POST', 
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload) 
+        });
+      }
+
+      if (res.ok) {
+        alert(editingTxId ? "Expense updated successfully!" : "Expense added successfully!");
+        setShowModal(false);
+        resetForm();
+        fetchData();
+      } else {
+        alert("Failed to save the record.");
+      }
+    } catch (error) {
+      alert("An error occurred while saving.");
+    } finally {
+      setIsSaving(false);
     }
-    setIsSaving(false);
   };
 
   const profileOptions = [{ label: 'No Profile (One-time)', value: 'NONE' }, ...expenseProfiles];
@@ -101,7 +212,7 @@ export default function ExpensePage() {
       >
         <div className="flex justify-between items-center">
           <h1 className="text-xl font-bold text-slate-900">Expenses</h1>
-          <button onClick={() => setShowModal(true)} className="flex items-center gap-1 text-red-600 bg-red-50 px-3 py-1.5 rounded-full text-sm font-semibold hover:bg-red-100">
+          <button onClick={() => { resetForm(); setShowModal(true); }} className="flex items-center gap-1 text-red-600 bg-red-50 px-3 py-1.5 rounded-full text-sm font-semibold hover:bg-red-100 transition-colors">
             <Plus className="h-4 w-4" /> Add
           </button>
         </div>
@@ -133,7 +244,7 @@ export default function ExpensePage() {
           }
           
           const CardContent = (
-            <div className="flex items-center justify-between p-4 bg-white rounded-xl border border-slate-100 shadow-sm active:bg-slate-50 transition-colors gap-4">
+            <div className="flex items-center justify-between p-4 bg-white rounded-xl border border-slate-100 shadow-sm active:bg-slate-50 transition-colors gap-4 group">
               <div className="flex items-center gap-3 flex-1 min-w-0">
                 <div className="h-10 w-10 bg-red-50 rounded-full flex items-center justify-center border border-red-100 shrink-0">
                   <Icon className="h-5 w-5 text-red-600" />
@@ -146,7 +257,28 @@ export default function ExpensePage() {
                   <p className="text-xs text-slate-500 mt-1 break-words leading-snug">{new Date(tx.date).toLocaleDateString()} • {subText}</p>
                 </div>
               </div>
-              <p className="font-bold text-red-600 shrink-0 whitespace-nowrap">-৳{Number(tx.amount).toLocaleString()}</p>
+              
+              <div className="flex flex-col items-end gap-2 shrink-0">
+                <p className="font-bold text-red-600 whitespace-nowrap">-৳{Number(tx.amount).toLocaleString()}</p>
+                
+                {/* Only allow edit/delete for explicit EXPENSE records here */}
+                {tx.type === 'EXPENSE' && (
+                  <div className="flex items-center gap-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button 
+                      onClick={(e) => handleEditClick(tx, e)} 
+                      className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                    >
+                      <Edit className="h-4 w-4" />
+                    </button>
+                    <button 
+                      onClick={(e) => handleDeleteClick(tx.id, e)} 
+                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           );
 
@@ -170,7 +302,7 @@ export default function ExpensePage() {
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
                 className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" 
-                onClick={() => setShowModal(false)} 
+                onClick={() => { setShowModal(false); resetForm(); }} 
               />
               
               <motion.div 
@@ -178,22 +310,26 @@ export default function ExpensePage() {
                 animate={{ y: 0 }}
                 exit={{ y: '100%' }}
                 transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-                className="relative bg-white rounded-t-3xl p-6 pb-8 shadow-2xl max-w-md mx-auto w-full flex flex-col max-h-[85vh]"
+                className="relative bg-white rounded-t-3xl p-6 pb-8 shadow-2xl max-w-md mx-auto w-full flex flex-col max-h-[90vh]"
               >
-                <h3 className="text-xl font-bold mb-4 shrink-0">Add Expense</h3>
+                <div className="flex justify-between items-center mb-4 shrink-0">
+                  <h3 className="text-xl font-bold flex items-center gap-2 text-slate-900">
+                    {editingTxId ? <Edit className="h-5 w-5 text-blue-600" /> : <Plus className="h-5 w-5 text-blue-600" />}
+                    {editingTxId ? 'Edit Expense' : 'Add Expense'}
+                  </h3>
+                  <button onClick={() => { setShowModal(false); resetForm(); }} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors">
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
                 
                 <form onSubmit={handleSave} className="flex flex-col flex-1 overflow-hidden">
-                  <div className="space-y-4 overflow-y-auto px-1 pb-4 flex-1">
+                  <div className="space-y-4 overflow-y-auto px-1 pb-32 flex-1 overscroll-contain">
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Amount (৳)</label>
                       <input 
-                        type="number" 
-                        required 
-                        min="0" 
-                        step="0.01" 
-                        value={amount} 
-                        onChange={(e) => setAmount(e.target.value)} 
-                        className="w-full h-14 px-4 text-xl font-bold rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white placeholder:text-slate-400" 
+                        type="number" required min="0" step="0.01" 
+                        value={amount} onChange={(e) => setAmount(e.target.value)} 
+                        className="w-full h-14 px-4 text-xl font-bold text-slate-900 bg-white placeholder:text-slate-400 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" 
                         placeholder="0.00" 
                       />
                     </div>
@@ -209,11 +345,9 @@ export default function ExpensePage() {
                     <div className="relative z-[40]">
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Date</label>
                       <input 
-                        type="date" 
-                        required 
-                        value={date} 
-                        onChange={(e) => setDate(e.target.value)} 
-                        className="w-full h-14 px-4 bg-white rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900" 
+                        type="date" required 
+                        value={date} onChange={(e) => setDate(e.target.value)} 
+                        className="w-full h-14 px-4 bg-white text-slate-900 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" 
                       />
                     </div>
                     
@@ -221,17 +355,16 @@ export default function ExpensePage() {
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Description (Optional)</label>
                       <input 
                         type="text" 
-                        value={description} 
-                        onChange={(e) => setDescription(e.target.value)} 
-                        className="w-full h-14 px-4 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 bg-white placeholder:text-slate-400" 
+                        value={description} onChange={(e) => setDescription(e.target.value)} 
+                        className="w-full h-14 px-4 text-slate-900 bg-white placeholder:text-slate-400 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" 
                         placeholder="e.g. Electric Bill May" 
                       />
                     </div>
                   </div>
 
-                  <div className="pt-2 mt-auto shrink-0 bg-white">
-                    <button type="submit" disabled={isSaving || !profileId || !method} className="w-full h-14 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors">
-                      {isSaving ? 'Saving...' : 'Save Expense'}
+                  <div className="pt-4 mt-auto shrink-0 bg-white border-t border-slate-100">
+                    <button type="submit" disabled={isSaving || !profileId || !method} className="w-full h-14 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                      {isSaving ? 'Processing...' : editingTxId ? 'Update Record' : 'Save Expense'}
                     </button>
                   </div>
                 </form>
