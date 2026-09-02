@@ -4,11 +4,16 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
-import { Plus, ArrowUpRight, FolderOpen, ChevronRight, Wallet, ArrowDownRight, Edit, Trash2, X } from 'lucide-react';
+import { Plus, ArrowUpRight, FolderOpen, ChevronRight, Wallet, Edit, Trash2, X } from 'lucide-react';
 import CustomDropdown from '@/components/CustomDropdown';
 
 // --- TYPESCRIPT DEFINITIONS ---
-type Transaction = {
+interface TransactionFunding {
+  person_id: string;
+  amount: number | string;
+}
+
+interface Transaction {
   id: string;
   type: string;
   amount: number | string;
@@ -20,11 +25,42 @@ type Transaction = {
   expense_profile_id?: string;
   people_profiles?: { name: string };
   expense_profiles?: { name: string };
-};
+  transaction_fundings?: TransactionFunding[];
+}
 
-type ProfileOption = {
+interface ProfileOption {
   label: string;
   value: string;
+}
+
+interface FundingSource {
+  id: string;
+  personId: string;
+  amount: string;
+}
+
+// --- UTILITIES ---
+const formatDate = (dateInput: string | Date): string => {
+  if (!dateInput) return '';
+  if (typeof dateInput === 'string' && dateInput.includes('-')) {
+    const parts = dateInput.split('T')[0].split('-');
+    if (parts.length === 3) {
+      const [year, month, day] = parts;
+      return `${day}/${month}/${year}`;
+    }
+  }
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return '';
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`;
+};
+
+const getLocalToday = () => {
+  const d = new Date();
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+  return d.toISOString().split('T')[0];
 };
 
 // --- FRAMER MOTION VARIANTS ---
@@ -45,6 +81,8 @@ const itemVariants: Variants = {
 export default function ExpensePage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [expenseProfiles, setExpenseProfiles] = useState<ProfileOption[]>([]);
+  const [peopleOptions, setPeopleOptions] = useState<ProfileOption[]>([]);
+  const [personMaxLimits, setPersonMaxLimits] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
   
@@ -52,11 +90,15 @@ export default function ExpensePage() {
   const [showModal, setShowModal] = useState(false);
   const [editingTxId, setEditingTxId] = useState<string | null>(null);
   const [amount, setAmount] = useState('');
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  
+  const todayDate = getLocalToday();
+  const [date, setDate] = useState(todayDate);
+  
   const [profileId, setProfileId] = useState('');
-  const [oneTimeName, setOneTimeName] = useState(''); // Tracks the custom name for 'No Profile'
+  const [oneTimeName, setOneTimeName] = useState(''); 
   const [method, setMethod] = useState('');
   const [description, setDescription] = useState('');
+  const [fundingSources, setFundingSources] = useState<FundingSource[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
   const [methods, setMethods] = useState([
@@ -67,17 +109,57 @@ export default function ExpensePage() {
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      const [txRes, profRes] = await Promise.all([
-        fetch('/api/transactions?type=EXPENSE,LEND,BORROW_REPAYMENT'),
-        fetch('/api/expense-profiles')
+      const [txRes, profRes, peopleRes] = await Promise.all([
+        fetch('/api/transactions?type=EXPENSE,LEND,BORROW,BORROW_REPAYMENT,LEND_REPAYMENT'),
+        fetch('/api/expense-profiles'),
+        fetch('/api/people')
       ]);
+      
+      let allTxs: Transaction[] = [];
       if (txRes.ok) {
         const data = await txRes.json();
-        setTransactions(data.transactions);
+        allTxs = data.transactions || [];
+        setTransactions(allTxs);
       }
+      
       if (profRes.ok) {
         const data = await profRes.json();
-        setExpenseProfiles(data.profiles.map((p: any) => ({ label: p.name, value: p.id })));
+        setExpenseProfiles((data.profiles || []).map((p: any) => ({ label: p.name, value: p.id })));
+      }
+
+      if (peopleRes.ok) {
+        const data = await peopleRes.json();
+        const rawPeople = data.people || [];
+        setPeopleOptions(rawPeople.map((p: any) => ({ label: p.name, value: p.id })));
+
+        // Calculate precise unspent loan limit per person
+        const limits: Record<string, number> = {};
+        rawPeople.forEach((p: any) => {
+          let totalBorrowed = 0;
+          let totalRepaid = 0;
+          let totalSpentFromPerson = 0;
+
+          allTxs.forEach(tx => {
+            if (tx.person_id === p.id) {
+              const amt = Number(tx.amount);
+              if (tx.type === 'BORROW') totalBorrowed += amt;
+              if (tx.type === 'BORROW_REPAYMENT') totalRepaid += amt;
+            }
+            if (tx.transaction_fundings) {
+              tx.transaction_fundings.forEach(f => {
+                if (f.person_id === p.id) {
+                  // If editing, exclude the current transaction's contribution so you can reuse/modify it safely
+                  if (!editingTxId || tx.id !== editingTxId) {
+                    totalSpentFromPerson += Number(f.amount);
+                  }
+                }
+              });
+            }
+          });
+
+          limits[p.id] = Math.max(0, (totalBorrowed - totalRepaid) - totalSpentFromPerson);
+        });
+        setPersonMaxLimits(limits);
       }
     } catch (error) {
       console.error("Failed to fetch data:", error);
@@ -89,7 +171,8 @@ export default function ExpensePage() {
   useEffect(() => { 
     setMounted(true);
     fetchData(); 
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editingTxId]);
 
   const handleAddMethod = (val: string) => {
     setMethods(p => [...p, { label: val, value: val }]);
@@ -115,17 +198,50 @@ export default function ExpensePage() {
     }
   };
 
+  // --- FUNDING SPLIT ACTIONS ---
+  const addFundingSource = () => {
+    setFundingSources([...fundingSources, { id: Math.random().toString(36).substring(2, 9), personId: '', amount: '' }]);
+  };
+
+  const removeFundingSource = (id: string) => {
+    setFundingSources(fundingSources.filter(f => f.id !== id));
+  };
+
+  const updateFundingSource = (id: string, field: 'personId' | 'amount', value: string) => {
+    setFundingSources(prev => prev.map(f => {
+      if (f.id === id) {
+        // If the person is changed, reset the amount to 0/empty to prevent accidental over-drafting
+        if (field === 'personId' && f.personId !== value) {
+          return { ...f, personId: value, amount: '' };
+        }
+        return { ...f, [field]: value };
+      }
+      return f;
+    }));
+  };
+
+  const totalFunded = fundingSources.reduce((sum, f) => sum + (parseFloat(f.amount) || 0), 0);
+  const isOverFunded = parseFloat(amount || '0') > 0 && totalFunded > parseFloat(amount || '0');
+
+  // Check if any selected funding source exceeds that person's specific limit
+  const hasExceededPersonLimit = fundingSources.some(f => {
+    if (!f.personId) return false;
+    const limit = personMaxLimits[f.personId] ?? 0;
+    return parseFloat(f.amount || '0') > limit;
+  });
+
   const resetForm = () => {
     setEditingTxId(null);
     setAmount('');
     setMethod('');
     setDescription('');
-    setDate(new Date().toISOString().split('T')[0]);
+    setDate(todayDate);
     setProfileId('');
     setOneTimeName('');
+    setFundingSources([]);
   };
 
-  // --- ACTIONS ---
+  // --- CRUD ACTIONS ---
   const handleEditClick = (tx: Transaction, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -137,6 +253,17 @@ export default function ExpensePage() {
     setDescription(tx.description || '');
     setProfileId(tx.expense_profile_id || 'NONE');
     setOneTimeName(!tx.expense_profile_id && tx.type === 'EXPENSE' ? tx.source_or_method : '');
+    
+    if (tx.transaction_fundings && tx.transaction_fundings.length > 0) {
+      setFundingSources(tx.transaction_fundings.map(f => ({
+        id: Math.random().toString(36).substring(2, 9),
+        personId: f.person_id,
+        amount: f.amount.toString()
+      })));
+    } else {
+      setFundingSources([]);
+    }
+
     setShowModal(true);
   };
 
@@ -144,12 +271,11 @@ export default function ExpensePage() {
     e.preventDefault();
     e.stopPropagation();
     
-    if (!window.confirm("Are you sure you want to delete this expense record?")) return;
+    if (!window.confirm("Are you sure you want to delete this expense record? (This will also release any split funds back to the lenders.)")) return;
     
     try {
       const res = await fetch(`/api/transactions/${id}`, { method: 'DELETE' });
       if (res.ok) {
-        alert("Expense record deleted successfully!");
         fetchData();
       } else {
         alert("Failed to delete the record.");
@@ -161,8 +287,21 @@ export default function ExpensePage() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isOverFunded) {
+      alert("The total funded amount cannot exceed the total expense amount!");
+      return;
+    }
+    if (hasExceededPersonLimit) {
+      alert("One or more funding amounts exceed the selected person's available unspent loan balance!");
+      return;
+    }
+
     setIsSaving(true);
     
+    const validFundings = fundingSources
+      .filter(f => f.personId && f.amount && parseFloat(f.amount) > 0)
+      .map(f => ({ personId: f.personId, amount: parseFloat(f.amount) }));
+
     const payload = {
       type: 'EXPENSE', 
       amount: parseFloat(amount), 
@@ -171,6 +310,7 @@ export default function ExpensePage() {
       description,
       source: profileId === 'NONE' ? (oneTimeName.trim() || 'General Expense') : expenseProfiles.find(p => p.value === profileId)?.label,
       profileId: profileId !== 'NONE' ? profileId : null,
+      fundingSources: validFundings
     };
     
     try {
@@ -190,7 +330,6 @@ export default function ExpensePage() {
       }
 
       if (res.ok) {
-        alert(editingTxId ? "Expense updated successfully!" : "Expense added successfully!");
         setShowModal(false);
         resetForm();
         fetchData();
@@ -246,37 +385,33 @@ export default function ExpensePage() {
             displayName = `Installment Paid to ${tx.people_profiles?.name || tx.source_or_method}`;
           }
           
+          const isFunded = tx.transaction_fundings && tx.transaction_fundings.length > 0;
+          
           const CardContent = (
             <div className="flex items-center justify-between p-4 bg-white rounded-xl border border-slate-100 shadow-sm active:bg-slate-50 transition-colors gap-4 group">
               <div className="flex items-center gap-3 flex-1 min-w-0">
-                <div className="h-10 w-10 bg-red-50 rounded-full flex items-center justify-center border border-red-100 shrink-0">
+                <div className="h-10 w-10 bg-red-50 rounded-full flex items-center justify-center border border-red-100 shrink-0 relative">
                   <Icon className="h-5 w-5 text-red-600" />
+                  {isFunded && <div className="absolute -top-1 -right-1 h-3 w-3 bg-blue-500 border-2 border-white rounded-full"></div>}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start gap-1">
                     <p className="font-semibold text-slate-900 leading-tight break-words">{displayName}</p>
                     {(tx.expense_profile_id || tx.person_id) && <ChevronRight className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />}
                   </div>
-                  <p className="text-xs text-slate-500 mt-1 break-words leading-snug">{new Date(tx.date).toLocaleDateString()} • {subText}</p>
+                  <p className="text-xs text-slate-500 mt-1 break-words leading-snug">{formatDate(tx.date)} • {subText}</p>
                 </div>
               </div>
               
               <div className="flex flex-col items-end gap-2 shrink-0">
                 <p className="font-bold text-red-600 whitespace-nowrap">-৳{Number(tx.amount).toLocaleString()}</p>
                 
-                {/* Only allow edit/delete for explicit EXPENSE records here */}
                 {tx.type === 'EXPENSE' && (
                   <div className="flex items-center gap-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button 
-                      onClick={(e) => handleEditClick(tx, e)} 
-                      className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
-                    >
+                    <button onClick={(e) => handleEditClick(tx, e)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors">
                       <Edit className="h-4 w-4" />
                     </button>
-                    <button 
-                      onClick={(e) => handleDeleteClick(tx.id, e)} 
-                      className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
-                    >
+                    <button onClick={(e) => handleDeleteClick(tx.id, e)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors">
                       <Trash2 className="h-4 w-4" />
                     </button>
                   </div>
@@ -313,7 +448,7 @@ export default function ExpensePage() {
                 animate={{ y: 0 }}
                 exit={{ y: '100%' }}
                 transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-                className="relative bg-white rounded-t-3xl p-6 pb-8 shadow-2xl max-w-md mx-auto w-full flex flex-col max-h-[90vh]"
+                className="relative bg-white rounded-t-3xl p-6 pb-8 shadow-2xl max-w-md mx-auto w-full flex flex-col max-h-[92vh]"
               >
                 <div className="flex justify-between items-center mb-4 shrink-0">
                   <h3 className="text-xl font-bold flex items-center gap-2 text-slate-900">
@@ -326,19 +461,21 @@ export default function ExpensePage() {
                 </div>
                 
                 <form onSubmit={handleSave} className="flex flex-col flex-1 overflow-hidden">
-                  {/* Hides scrollbar completely but allows scrolling */}
-                  <div className="space-y-4 overflow-y-auto px-1 pb-24 flex-1 overscroll-contain [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-                    <div>
+                  <div className="space-y-4 overflow-y-auto px-1 pb-48 flex-1 overscroll-contain [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                    
+                    {/* AMOUNT */}
+                    <div className="relative z-[100]">
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Amount (৳)</label>
                       <input 
                         type="number" required min="0" step="0.01" 
                         value={amount} onChange={(e) => setAmount(e.target.value)} 
-                        className="w-full h-14 px-4 text-xl font-bold text-slate-900 bg-white placeholder:text-slate-400 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" 
+                        className={`w-full h-14 px-4 text-xl font-bold rounded-xl border focus:outline-none focus:ring-2 transition-all bg-white text-slate-900 placeholder:text-slate-400 ${isOverFunded ? 'border-red-500 focus:ring-red-500' : 'border-slate-200 focus:ring-blue-500'}`}
                         placeholder="0.00" 
                       />
+                      {isOverFunded && <p className="text-xs text-red-500 mt-1.5 font-medium">Funded amount exceeds expense total!</p>}
                     </div>
                     
-                    <div className="relative z-[60]">
+                    <div className="relative z-[90]">
                       <CustomDropdown label="Expense Ledger Profile" options={profileOptions} value={profileId} onChange={setProfileId} onAdd={handleAddProfile} addLabel="Create ledger" />
                     </div>
 
@@ -348,7 +485,7 @@ export default function ExpensePage() {
                           initial={{ opacity: 0, height: 0, marginTop: 0 }} 
                           animate={{ opacity: 1, height: 'auto', marginTop: 16 }} 
                           exit={{ opacity: 0, height: 0, marginTop: 0 }} 
-                          className="relative z-[55] overflow-hidden"
+                          className="relative z-[85] overflow-visible"
                         >
                           <label className="block text-sm font-medium text-slate-700 mb-1.5">Expense Title (One-time)</label>
                           <input 
@@ -361,20 +498,20 @@ export default function ExpensePage() {
                       )}
                     </AnimatePresence>
                     
-                    <div className="relative z-[50]">
+                    <div className="relative z-[80]">
                       <CustomDropdown label="Method" options={methods} value={method} onChange={setMethod} onAdd={handleAddMethod} addLabel="Add method" />
                     </div>
                     
-                    <div className="relative z-[40]">
+                    <div className="relative z-[70]">
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Date</label>
                       <input 
-                        type="date" required 
+                        type="date" required max={todayDate}
                         value={date} onChange={(e) => setDate(e.target.value)} 
                         className="w-full h-14 px-4 bg-white text-slate-900 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" 
                       />
                     </div>
                     
-                    <div className="relative z-[30]">
+                    <div className="relative z-[60]">
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Description (Optional)</label>
                       <input 
                         type="text" 
@@ -383,12 +520,70 @@ export default function ExpensePage() {
                         placeholder="e.g. For Mother's Gift" 
                       />
                     </div>
+
+                    {/* --- FUNDING SPLIT SECTION --- */}
+                    <div className="pt-6 mt-4 border-t border-slate-100 relative z-[50]">
+                      <div className="flex justify-between items-center mb-4">
+                        <div>
+                          <label className="block text-sm font-medium text-slate-900">Funded By (Optional)</label>
+                          <p className="text-[10px] text-slate-500 mt-0.5">Split expense across loans you've taken</p>
+                        </div>
+                        <button type="button" onClick={addFundingSource} className="text-xs font-bold text-blue-600 bg-blue-50 px-2.5 py-1.5 rounded-lg hover:bg-blue-100 flex items-center gap-1 transition-colors">
+                          <Plus className="h-3.5 w-3.5"/> Add Source
+                        </button>
+                      </div>
+
+                      {fundingSources.map((source, index) => {
+                        const availablePeople = peopleOptions.filter(p => 
+                          p.value === source.personId || !fundingSources.some(f => f.personId === p.value)
+                        );
+
+                        const maxLimitForPerson = source.personId ? (personMaxLimits[source.personId] ?? 0) : null;
+                        const isThisExceeded = maxLimitForPerson !== null && parseFloat(source.amount || '0') > maxLimitForPerson;
+
+                        return (
+                          <div 
+                            key={source.id} 
+                            className="mb-3 relative" 
+                            style={{ zIndex: 50 - index }}
+                          >
+                            <div className="flex gap-2 relative">
+                              <div className="flex-1 relative" style={{ zIndex: 50 - index }}>
+                                <CustomDropdown 
+                                  options={availablePeople} 
+                                  value={source.personId} 
+                                  onChange={(val) => updateFundingSource(source.id, 'personId', val)} 
+                                  label="" 
+                                />
+                              </div>
+                              <div className="w-1/3 shrink-0 relative z-0">
+                                <input 
+                                  type="number" min="0" step="0.01" required placeholder="Amount"
+                                  max={maxLimitForPerson !== null ? maxLimitForPerson : undefined}
+                                  value={source.amount} onChange={(e) => updateFundingSource(source.id, 'amount', e.target.value)} 
+                                  className={`relative z-0 w-full h-14 px-3 text-sm rounded-xl border bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 transition-all ${isThisExceeded ? 'border-red-500 focus:ring-red-500' : 'border-slate-200 focus:ring-blue-500'}`}
+                                />
+                              </div>
+                              <button type="button" onClick={() => removeFundingSource(source.id)} className="relative z-0 h-14 w-10 flex items-center justify-center text-slate-400 hover:text-red-500 bg-slate-50 rounded-xl shrink-0 transition-colors">
+                                <X className="h-5 w-5"/>
+                              </button>
+                            </div>
+                            {maxLimitForPerson !== null && (
+                              <p className={`text-[11px] mt-1 font-medium ${isThisExceeded ? 'text-red-500' : 'text-slate-500'}`}>
+                                {isThisExceeded ? `Exceeds max available: ৳${maxLimitForPerson.toLocaleString()}` : `Max available: ৳${maxLimitForPerson.toLocaleString()}`}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+
                   </div>
 
-                  <div className="pt-4 mt-auto shrink-0 bg-white border-t border-slate-100">
+                  <div className="pt-4 mt-auto shrink-0 bg-white border-t border-slate-100 relative z-0">
                     <button 
                       type="submit" 
-                      disabled={isSaving || !profileId || !method || (profileId === 'NONE' && !oneTimeName.trim())} 
+                      disabled={isSaving || !profileId || !method || (profileId === 'NONE' && !oneTimeName.trim()) || isOverFunded || hasExceededPersonLimit} 
                       className="w-full h-14 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 disabled:opacity-50 transition-colors"
                     >
                       {isSaving ? 'Processing...' : editingTxId ? 'Update Record' : 'Save Expense'}

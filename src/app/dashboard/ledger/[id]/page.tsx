@@ -6,12 +6,12 @@ import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { 
   ArrowLeft, ArrowUpRight, ArrowDownRight, CheckCircle2, 
-  Wallet, HandCoins, FileSpreadsheet, Printer, ChevronDown, Edit, Trash2 
+  Wallet, HandCoins, FileSpreadsheet, Printer, ChevronDown, Edit, Trash2, ShoppingBag 
 } from 'lucide-react';
 import CustomDropdown from '@/components/CustomDropdown';
 
 // --- TYPESCRIPT INTERFACES ---
-type TxType = 'LEND' | 'BORROW' | 'LEND_REPAYMENT' | 'BORROW_REPAYMENT';
+type TxType = 'LEND' | 'BORROW' | 'LEND_REPAYMENT' | 'BORROW_REPAYMENT' | 'ASSET_PURCHASE' | 'EXPENSE';
 
 interface Transaction {
   id: string;
@@ -34,7 +34,6 @@ interface DisplayTransaction extends Transaction {
 }
 
 // --- UTILITIES ---
-// Safely formats date to strictly DD/MM/YYYY
 const formatDate = (dateInput: string | Date): string => {
   if (!dateInput) return '';
   if (typeof dateInput === 'string' && dateInput.includes('-')) {
@@ -52,7 +51,6 @@ const formatDate = (dateInput: string | Date): string => {
   return `${day}/${month}/${year}`;
 };
 
-// Gets precise local date to prevent timezone offset bugs
 const getLocalToday = () => {
   const d = new Date();
   d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
@@ -85,6 +83,7 @@ export default function PersonLedgerPage() {
   const [showModal, setShowModal] = useState(false);
   const [editingTxId, setEditingTxId] = useState<string | null>(null);
   const [txType, setTxType] = useState<TxType>('LEND');
+  const [repayMode, setRepayMode] = useState<'REPAYMENT' | 'ASSET'>('REPAYMENT');
   const [amount, setAmount] = useState('');
   const [originalAmount, setOriginalAmount] = useState(0); 
   const [method, setMethod] = useState('');
@@ -104,8 +103,8 @@ export default function PersonLedgerPage() {
     if (res.ok) {
       const data = await res.json();
       setPerson(data.person);
-      setTransactions(data.transactions);
-      setNetBalance(data.netBalance);
+      setTransactions(data.transactions || []);
+      setNetBalance(data.netBalance || 0);
     }
     setIsLoading(false);
   };
@@ -124,6 +123,7 @@ export default function PersonLedgerPage() {
   const handleActionClick = (type: TxType) => {
     setEditingTxId(null);
     setTxType(type);
+    setRepayMode('REPAYMENT'); 
     setAmount('');
     setOriginalAmount(0);
     setMethod('');
@@ -135,6 +135,7 @@ export default function PersonLedgerPage() {
   const handleEditClick = (tx: Transaction) => {
     setEditingTxId(tx.id);
     setTxType(tx.type);
+    setRepayMode('REPAYMENT'); 
     setAmount(tx.amount.toString());
     setOriginalAmount(Number(tx.amount));
     setMethod(tx.transaction_method);
@@ -153,14 +154,24 @@ export default function PersonLedgerPage() {
     }
   };
 
-  // --- VALIDATION LOGIC FOR INSTALLMENTS ---
+  // --- STRICT VALIDATION LOGIC FOR UNSPENT LOANS ---
+  let totalAssetPurchases = 0;
+  transactions.forEach(tx => {
+    if (tx.type === 'ASSET_PURCHASE') totalAssetPurchases += Number(tx.amount);
+  });
+
+  const outstandingDebt = netBalance < 0 ? Math.abs(netBalance) : 0;
+  const unspentLoanFromPerson = Math.max(0, outstandingDebt - totalAssetPurchases);
+
   let maxAllowed: number | null = null;
   if (txType === 'LEND_REPAYMENT') {
-    maxAllowed = editingTxId ? netBalance + originalAmount : netBalance;
-    maxAllowed = Number(maxAllowed.toFixed(2));
+    maxAllowed = Number((editingTxId ? netBalance + originalAmount : netBalance).toFixed(2));
   } else if (txType === 'BORROW_REPAYMENT') {
-    maxAllowed = editingTxId ? Math.abs(netBalance) + originalAmount : Math.abs(netBalance);
-    maxAllowed = Number(maxAllowed.toFixed(2));
+    if (repayMode === 'ASSET') {
+      maxAllowed = Number((editingTxId ? unspentLoanFromPerson + originalAmount : unspentLoanFromPerson).toFixed(2));
+    } else {
+      maxAllowed = Number((editingTxId ? Math.abs(netBalance) + originalAmount : Math.abs(netBalance)).toFixed(2));
+    }
   }
 
   const numericAmount = parseFloat(amount) || 0;
@@ -169,13 +180,13 @@ export default function PersonLedgerPage() {
   const handleSaveTransaction = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isAmountExceeded) {
-      alert("Installment amount exceeds the outstanding balance!");
+      alert("Amount exceeds the allowed limit!");
       return;
     }
     
     setIsSaving(true);
 
-    const payload = {
+    let payload: any = {
       type: txType,
       amount: numericAmount,
       method,
@@ -184,6 +195,24 @@ export default function PersonLedgerPage() {
       personId: params.id as string,
       source: person?.name || 'Ledger', 
     };
+
+    // BULLETPROOF FIX: We inject both `personId` AND `person_id` to ensure the API 
+    // strictly catches it regardless of spelling mismatch in the backend!
+    if (txType === 'BORROW_REPAYMENT' && repayMode === 'ASSET' && !editingTxId) {
+      payload = {
+        type: 'EXPENSE',
+        amount: numericAmount,
+        method,
+        date,
+        description: description || 'Asset Purchase',
+        source: 'Funded by Loan',
+        fundingSources: [{ 
+          personId: params.id as string, 
+          person_id: params.id as string, 
+          amount: numericAmount 
+        }]
+      };
+    }
 
     let url = '/api/transactions';
     let methodType = 'POST';
@@ -227,6 +256,8 @@ export default function PersonLedgerPage() {
       displayType = 'Received Installment (কিস্তি গ্রহণ)'; taken = amt.toString(); totalTaken += amt; runningBalance -= amt;
     } else if (tx.type === 'BORROW_REPAYMENT') { 
       displayType = 'Paid Installment (কিস্তি প্রদান)'; given = amt.toString(); totalGiven += amt; runningBalance += amt;
+    } else if (tx.type === 'ASSET_PURCHASE') {
+      displayType = 'Asset Purchase (সম্পদ ক্রয়)'; given = '-'; taken = '-'; 
     }
 
     let shortBalanceText = 'Settled';
@@ -263,7 +294,7 @@ export default function PersonLedgerPage() {
     
     chronologicalTxs.forEach(row => {
       const safeRemarks = `"${(row.description || '').replace(/"/g, '""')}"`;
-      csvContent += `${row.index + 1},${formatDate(row.date)},"${row.displayType}",${safeRemarks},${row.transaction_method},${row.taken},${row.given},"${row.fullBalanceText}"\n`;
+      csvContent += `${row.index + 1},${formatDate(row.date)},"${row.displayType}",${safeRemarks},${row.transaction_method || '-'},${row.taken},${row.given},"${row.fullBalanceText}"\n`;
     });
 
     csvContent += `\n,,,,,Overall Taken (মোট গ্রহণ),Overall Given (মোট প্রদান),Adjusted Balance (সমন্বয়কৃত জের)\n`;
@@ -293,7 +324,13 @@ export default function PersonLedgerPage() {
       case 'LEND': return { title: `Give Loan to ${person?.name}`, bg: "bg-red-50", color: "text-red-600" };
       case 'BORROW': return { title: `Take Loan from ${person?.name}`, bg: "bg-green-50", color: "text-green-600" };
       case 'LEND_REPAYMENT': return { title: `Receive Installment from ${person?.name}`, bg: "bg-green-50", color: "text-green-600" };
-      case 'BORROW_REPAYMENT': return { title: `Pay Installment to ${person?.name}`, bg: "bg-red-50", color: "text-red-600" };
+      case 'BORROW_REPAYMENT': 
+        return { 
+          title: repayMode === 'ASSET' ? `Buy Asset via ${person?.name}'s Loan` : `Pay Installment to ${person?.name}`, 
+          bg: repayMode === 'ASSET' ? "bg-blue-50" : "bg-red-50", 
+          color: repayMode === 'ASSET' ? "text-blue-600" : "text-red-600" 
+        };
+      default: return { title: '', bg: '', color: '' };
     }
   };
 
@@ -392,7 +429,7 @@ export default function PersonLedgerPage() {
               
               <button onClick={() => handleActionClick('BORROW_REPAYMENT')} disabled={!canPayInstallment} className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-2 hover:bg-slate-50 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-sm">
                 <Wallet className="h-6 w-6 text-red-500" />
-                <span className="text-sm font-semibold text-slate-700 text-center">Pay Installment</span>
+                <span className="text-sm font-semibold text-slate-700 text-center">Pay Installment / Buy Asset</span>
               </button>
             </div>
           </motion.div>
@@ -405,22 +442,25 @@ export default function PersonLedgerPage() {
               ) : (
                 displayTxs.map((tx) => {
                   const isExpanded = expandedTxId === tx.id;
+                  const isAsset = tx.type === 'ASSET_PURCHASE';
                   
                   return (
                     <motion.div 
                       key={tx.id} 
                       variants={itemVariants}
-                      className="bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden transition-all duration-300"
+                      className={`bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-300 ${isAsset ? 'border-blue-100' : 'border-slate-100'}`}
                     >
                       <div className="flex items-center justify-between p-4 cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => setExpandedTxId(isExpanded ? null : tx.id)}>
                         <div className="flex items-center gap-3">
                           <div className={`h-10 w-10 rounded-full flex items-center justify-center border shrink-0 transition-colors ${
+                            isAsset ? 'bg-blue-50 border-blue-100' :
                             ['LEND', 'BORROW_REPAYMENT'].includes(tx.type) ? 'bg-red-50 border-red-100' : 'bg-green-50 border-green-100'
                           }`}>
                             {tx.type === 'LEND' && <ArrowUpRight className="h-5 w-5 text-red-600" />}
                             {tx.type === 'BORROW' && <ArrowDownRight className="h-5 w-5 text-green-600" />}
                             {tx.type === 'LEND_REPAYMENT' && <HandCoins className="h-5 w-5 text-green-600" />}
                             {tx.type === 'BORROW_REPAYMENT' && <Wallet className="h-5 w-5 text-red-600" />}
+                            {tx.type === 'ASSET_PURCHASE' && <ShoppingBag className="h-5 w-5 text-blue-600" />}
                           </div>
                           <div>
                             <div className="flex items-center gap-1">
@@ -429,20 +469,20 @@ export default function PersonLedgerPage() {
                                 {tx.type === 'BORROW' && 'Loan Taken'}
                                 {tx.type === 'LEND_REPAYMENT' && 'Received Installment'}
                                 {tx.type === 'BORROW_REPAYMENT' && 'Paid Installment'}
+                                {tx.type === 'ASSET_PURCHASE' && 'Asset Purchase'}
                               </p>
                               <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`} />
                             </div>
-                            {/* FIX: Applied the strict formatDate() here for the UI cards */}
                             <p className="text-xs text-slate-500 mt-0.5">{formatDate(tx.date)}</p>
                           </div>
                         </div>
                         
                         <div className="text-right">
-                          <p className={`font-bold ${['LEND', 'BORROW_REPAYMENT'].includes(tx.type) ? 'text-red-600' : 'text-green-600'}`}>
-                            {['LEND', 'BORROW_REPAYMENT'].includes(tx.type) ? '-' : '+'}৳{Number(tx.amount).toLocaleString()}
+                          <p className={`font-bold ${isAsset ? 'text-blue-600' : ['LEND', 'BORROW_REPAYMENT'].includes(tx.type) ? 'text-red-600' : 'text-green-600'}`}>
+                            {isAsset ? '' : ['LEND', 'BORROW_REPAYMENT'].includes(tx.type) ? '-' : '+'}৳{Number(tx.amount).toLocaleString()}
                           </p>
-                          <p className={`text-[11px] font-bold mt-0.5 ${tx.runningBalanceAmt === 0 ? 'text-slate-400' : tx.runningBalanceAmt > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            {tx.shortBalanceText}
+                          <p className={`text-[11px] font-bold mt-0.5 ${isAsset ? 'text-slate-400' : tx.runningBalanceAmt === 0 ? 'text-slate-400' : tx.runningBalanceAmt > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                            {isAsset ? 'Funded by Loan' : tx.shortBalanceText}
                           </p>
                         </div>
                       </div>
@@ -452,7 +492,7 @@ export default function PersonLedgerPage() {
                           <div className="grid grid-cols-2 gap-4">
                             <div>
                               <p className="text-slate-500 font-medium text-xs mb-1">Method</p>
-                              <p className="text-slate-900">{tx.transaction_method}</p>
+                              <p className="text-slate-900">{tx.transaction_method || '-'}</p>
                             </div>
                             <div>
                               <p className="text-slate-500 font-medium text-xs mb-1">Remarks / Reason</p>
@@ -460,14 +500,21 @@ export default function PersonLedgerPage() {
                             </div>
                           </div>
                           
-                          <div className="flex gap-2 mt-4 pt-4 border-t border-slate-200">
-                            <button onClick={() => handleEditClick(tx)} className="flex-1 py-2 flex items-center justify-center gap-1 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-100 transition-colors">
-                              <Edit className="h-3.5 w-3.5" /> Edit
-                            </button>
-                            <button onClick={() => handleDeleteClick(tx.id)} className="flex-1 py-2 flex items-center justify-center gap-1 bg-red-50 text-red-600 rounded-lg text-xs font-bold hover:bg-red-100 transition-colors">
-                              <Trash2 className="h-3.5 w-3.5" /> Delete
-                            </button>
-                          </div>
+                          {!isAsset && (
+                            <div className="flex gap-2 mt-4 pt-4 border-t border-slate-200">
+                              <button onClick={() => handleEditClick(tx)} className="flex-1 py-2 flex items-center justify-center gap-1 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-100 transition-colors">
+                                <Edit className="h-3.5 w-3.5" /> Edit
+                              </button>
+                              <button onClick={() => handleDeleteClick(tx.id)} className="flex-1 py-2 flex items-center justify-center gap-1 bg-red-50 text-red-600 rounded-lg text-xs font-bold hover:bg-red-100 transition-colors">
+                                <Trash2 className="h-3.5 w-3.5" /> Delete
+                              </button>
+                            </div>
+                          )}
+                          {isAsset && (
+                            <div className="mt-4 pt-4 border-t border-slate-200 text-center">
+                              <p className="text-xs text-slate-500 italic">This asset purchase was managed via the Expenses page.</p>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </motion.div>
@@ -497,14 +544,38 @@ export default function PersonLedgerPage() {
                   transition={{ type: 'spring', damping: 25, stiffness: 300 }}
                   className="relative bg-white rounded-t-3xl p-6 pb-8 shadow-2xl max-w-md mx-auto w-full flex flex-col max-h-[92vh]"
                 >
-                  <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold mb-6 w-fit ${actionInfo.bg} ${actionInfo.color}`}>
-                    <CheckCircle2 className="h-4 w-4" /> {editingTxId ? 'Edit Record:' : ''} {actionInfo.title}
+                  
+                  <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold mb-4 w-fit ${actionInfo.bg} ${actionInfo.color}`}>
+                    {txType === 'BORROW_REPAYMENT' && repayMode === 'ASSET' ? <ShoppingBag className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />} 
+                    {editingTxId ? 'Edit Record:' : ''} {actionInfo.title}
                   </div>
+
+                  {/* NEW: DUAL ACTION TOGGLE FOR BORROW REPAYMENT */}
+                  {txType === 'BORROW_REPAYMENT' && !editingTxId && (
+                    <div className="flex gap-2 mb-6 bg-slate-100 p-1 rounded-xl shrink-0">
+                      <button 
+                        type="button"
+                        onClick={() => { setRepayMode('REPAYMENT'); setAmount(''); }} 
+                        className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${repayMode === 'REPAYMENT' ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}
+                      >
+                        Pay Installment
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => { setRepayMode('ASSET'); setAmount(''); }} 
+                        className={`flex-1 py-2.5 text-sm font-bold rounded-lg transition-all ${repayMode === 'ASSET' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                      >
+                        Buy Asset
+                      </button>
+                    </div>
+                  )}
 
                   <form onSubmit={handleSaveTransaction} className="flex flex-col flex-1 overflow-hidden">
                     <div className="space-y-4 overflow-y-auto px-1 pb-48 flex-1 overscroll-contain [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                       <div>
-                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Amount (৳)</label>
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                          {repayMode === 'ASSET' ? 'Asset Price / Spent Amount (৳)' : 'Amount (৳)'}
+                        </label>
                         <input
                           type="number" required min="0.01" step="0.01" 
                           max={maxAllowed !== null ? maxAllowed : undefined}
@@ -515,12 +586,14 @@ export default function PersonLedgerPage() {
                           }`}
                           placeholder="0.00"
                         />
-                        {/* Dynamic Validation Warning Message */}
                         {maxAllowed !== null && (
                           <p className={`text-xs mt-1.5 font-medium ${isAmountExceeded ? 'text-red-500' : 'text-slate-500'}`}>
                             {isAmountExceeded 
-                              ? `Cannot exceed outstanding balance (৳${maxAllowed.toLocaleString()})` 
-                              : `Maximum allowed: ৳${maxAllowed.toLocaleString()}`}
+                              ? `Cannot exceed allowed limit (৳${maxAllowed.toLocaleString()})` 
+                              : repayMode === 'ASSET' 
+                                ? `Max unspent loan available: ৳${maxAllowed.toLocaleString()}` 
+                                : `Max outstanding debt: ৳${maxAllowed.toLocaleString()}`
+                            }
                           </p>
                         )}
                       </div>
@@ -533,7 +606,7 @@ export default function PersonLedgerPage() {
                         <label className="block text-sm font-medium text-slate-700 mb-1.5">Date</label>
                         <input
                           type="date" required 
-                          max={todayDate} // FIX: Prevents future date selection globally
+                          max={todayDate}
                           value={date}
                           onChange={(e) => setDate(e.target.value)}
                           className="w-full h-14 px-4 bg-white rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 transition-all"
@@ -541,12 +614,15 @@ export default function PersonLedgerPage() {
                       </div>
 
                       <div className="relative z-[40]">
-                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Remarks / Reason</label>
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5">
+                          {repayMode === 'ASSET' ? 'Asset Name / Description' : 'Remarks / Reason'}
+                        </label>
                         <input
-                          type="text" value={description}
+                          type="text" required={repayMode === 'ASSET'}
+                          value={description}
                           onChange={(e) => setDescription(e.target.value)}
                           className="w-full h-14 px-4 bg-white rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 placeholder:text-slate-400 transition-all"
-                          placeholder="e.g. For medical bills"
+                          placeholder={repayMode === 'ASSET' ? "e.g. Gaming PC" : "e.g. For medical bills"}
                         />
                       </div>
                     </div>
@@ -555,7 +631,7 @@ export default function PersonLedgerPage() {
                       <button 
                         type="submit" 
                         disabled={isSaving || !amount || !method || isAmountExceeded} 
-                        className="w-full h-14 bg-blue-600 text-white rounded-xl font-medium flex items-center justify-center hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                        className={`w-full h-14 text-white rounded-xl font-medium flex items-center justify-center disabled:opacity-50 transition-colors ${repayMode === 'ASSET' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-600 hover:bg-blue-700'}`}
                       >
                         {isSaving ? 'Processing...' : editingTxId ? 'Update Record' : 'Confirm Action'}
                       </button>
@@ -569,7 +645,7 @@ export default function PersonLedgerPage() {
         )}
       </div>
 
-      {/* --- PRINTABLE PDF REPORT --- */}
+      {/* --- PRINTABLE PDF REPORT (Visible ONLY during print) --- */}
       <div className="hidden print:block print-wrapper bg-white text-black font-sans min-h-screen pt-4">
         <div className="text-center mb-6">
           <h1 className="text-3xl font-bold text-slate-900 mb-2">Ledger Report (খতিয়ান রিপোর্ট)</h1>
@@ -594,11 +670,10 @@ export default function PersonLedgerPage() {
             {chronologicalTxs.map((row) => (
               <tr key={row.index} className="hover:bg-slate-50 break-inside-avoid">
                 <td className="border border-slate-300 px-4 py-3 text-center">{row.index + 1}</td>
-                {/* APPLIED formatDate HERE */}
                 <td className="border border-slate-300 px-4 py-3 whitespace-nowrap">{formatDate(row.date)}</td>
                 <td className="border border-slate-300 px-4 py-3 font-medium whitespace-nowrap">{row.displayType}</td>
                 <td className="border border-slate-300 px-4 py-3 break-words min-w-[150px]">{row.description}</td>
-                <td className="border border-slate-300 px-4 py-3 whitespace-nowrap">{row.transaction_method}</td>
+                <td className="border border-slate-300 px-4 py-3 whitespace-nowrap">{row.transaction_method || '-'}</td>
                 <td className="border border-slate-300 px-4 py-3 text-green-700 font-medium whitespace-nowrap">{row.taken}</td>
                 <td className="border border-slate-300 px-4 py-3 text-red-700 font-medium whitespace-nowrap">{row.given}</td>
                 <td className="border border-slate-300 px-4 py-3 font-bold whitespace-nowrap">{row.fullBalanceText}</td>
@@ -608,6 +683,7 @@ export default function PersonLedgerPage() {
         </table>
         
         <div className="flex justify-end mt-6 break-inside-avoid">
+          {/* Summary Box */}
           <div className="min-w-[450px] bg-slate-50 border border-slate-200 rounded-lg p-5 shadow-sm">
             <div className="flex justify-between mb-3 text-sm text-slate-600">
               <span>Overall Taken (মোট গ্রহণ):</span>
@@ -626,6 +702,7 @@ export default function PersonLedgerPage() {
           </div>
         </div>
       </div>
+      
     </div>
   );
 }

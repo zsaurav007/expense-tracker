@@ -29,10 +29,9 @@ export default function CustomDropdown({
 }: CustomDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [isDropUp, setIsDropUp] = useState(false); // NEW: Tracks if it should expand upwards
+  const [isDropUp, setIsDropUp] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdown when clicking outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
@@ -43,7 +42,6 @@ export default function CustomDropdown({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Filter options based on search
   const filteredOptions = useMemo(() => {
     if (!searchTerm) return options;
     return options.filter((opt) =>
@@ -67,16 +65,13 @@ export default function CustomDropdown({
     }
   };
 
-  // NEW: Smart Toggle Logic
   const toggleDropdown = () => {
     if (!isOpen && dropdownRef.current) {
-      // Calculate available space on the screen
       const rect = dropdownRef.current.getBoundingClientRect();
       const spaceBelow = window.innerHeight - rect.bottom;
       const spaceAbove = rect.top;
-      const estimatedDropdownHeight = 280; // Approximate max height of the menu
+      const estimatedDropdownHeight = 280; 
 
-      // If there is not enough space below, BUT there is more space above, flip it upwards!
       if (spaceBelow < estimatedDropdownHeight && spaceAbove > spaceBelow) {
         setIsDropUp(true);
       } else {
@@ -87,14 +82,9 @@ export default function CustomDropdown({
   };
 
   return (
-    <div 
-      className={`relative w-full text-slate-900 font-sans transition-colors duration-200 ${isOpen ? 'z-[100]' : 'z-10'}`} 
-      ref={dropdownRef}
-    >
-      {/* Optional Field Label */}
+    <div className="relative w-full text-slate-900 font-sans" ref={dropdownRef}>
       {label && <label className="block text-sm font-medium text-slate-700 mb-1.5">{label}</label>}
 
-      {/* Main Dropdown Button */}
       <button
         type="button"
         onClick={toggleDropdown}
@@ -108,15 +98,13 @@ export default function CustomDropdown({
         />
       </button>
 
-      {/* Dropdown Menu - DYNAMICALLY POSITIONS UP OR DOWN */}
       <div
-        className={`absolute w-full bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden transition-all duration-200 ease-in-out ${
+        className={`absolute z-[999] w-full bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden transition-all duration-200 ease-in-out ${
           isDropUp ? 'bottom-full mb-2 origin-bottom' : 'top-full mt-2 origin-top'
         } ${
-          isOpen ? 'opacity-100 scale-y-100' : 'opacity-0 scale-y-0 pointer-events-none'
+          isOpen ? 'opacity-100 scale-y-100 visible' : 'opacity-0 scale-y-0 invisible pointer-events-none'
         }`}
       >
-        {/* Search Input (Sticky) */}
         <div className="p-2 border-b border-slate-100 bg-slate-50/50">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
@@ -131,7 +119,6 @@ export default function CustomDropdown({
           </div>
         </div>
 
-        {/* Options List */}
         <ul className="max-h-56 overflow-y-auto overscroll-contain">
           {filteredOptions.length > 0 ? (
             filteredOptions.map((opt) => (
@@ -153,7 +140,6 @@ export default function CustomDropdown({
           )}
         </ul>
 
-        {/* Dynamic "+ Add New" Button */}
         {onAdd && searchTerm.trim() && (
           <div className="p-2 border-t border-slate-100 bg-slate-50">
             <button

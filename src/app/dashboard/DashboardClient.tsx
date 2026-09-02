@@ -23,16 +23,38 @@ export interface Transaction {
   source_or_method?: string;
   description?: string;
   transaction_method?: string;
+  transaction_fundings?: { person_id: string, amount: number | string }[];
   [key: string]: any;
 }
+
+// --- UTILITIES ---
+const formatDate = (dateInput: string | Date): string => {
+  if (!dateInput) return '';
+  if (typeof dateInput === 'string' && dateInput.includes('-')) {
+    const parts = dateInput.split('T')[0].split('-');
+    if (parts.length === 3) {
+      const [year, month, day] = parts;
+      return `${day}/${month}/${year}`;
+    }
+  }
+  const d = new Date(dateInput);
+  if (isNaN(d.getTime())) return '';
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`;
+};
+
+// Safe local date generator to prevent timezone shifting bugs
+const getLocalISODate = (dateObj: Date) => {
+  const offset = dateObj.getTimezoneOffset() * 60000;
+  return new Date(dateObj.getTime() - offset).toISOString().split('T')[0];
+};
 
 // --- ANIMATION CHOREOGRAPHY VARIANTS ---
 const containerVariants: Variants = {
   hidden: { opacity: 0 },
-  show: {
-    opacity: 1,
-    transition: { staggerChildren: 0.1 }
-  }
+  show: { opacity: 1, transition: { staggerChildren: 0.1 } }
 };
 
 const itemVariants: Variants = {
@@ -54,6 +76,7 @@ export default function DashboardClient({
   // --- STATE ---
   const [chartFilter, setChartFilter] = useState('month');
   const [reportFilter, setReportFilter] = useState('month');
+  const [reportType, setReportType] = useState('ALL'); 
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
 
@@ -69,35 +92,67 @@ export default function DashboardClient({
     { label: 'Custom Date Range', value: 'custom' }
   ];
 
+  const reportTypeOptions = [
+    { label: 'Overall Report (All Transactions)', value: 'ALL' },
+    { label: 'Income Only', value: 'INCOME' },
+    { label: 'Expense Only', value: 'EXPENSE' },
+  ];
+
   // --- EXIT GOD MODE ---
   const handleExitGodMode = async () => {
-    await fetch('/api/auth/logout', { method: 'POST' }); // Clears the sub-user session cookie
-    router.push('/master/dashboard'); // Sends you straight back to the admin panel
+    await fetch('/api/auth/logout', { method: 'POST' }); 
+    router.push('/master/dashboard'); 
   };
 
-  // --- HELPER: GET START DATE ---
+  // --- HELPER: GET START DATE (Timezone Safe) ---
   const getStartDate = (filter: string) => {
     const now = new Date();
     if (filter === 'week') {
-      const d = new Date(now);
-      d.setDate(now.getDate() - now.getDay()); 
-      return d.toISOString().split('T')[0];
+      now.setDate(now.getDate() - now.getDay()); 
+      return getLocalISODate(now);
     }
-    if (filter === 'month') return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
-    if (filter === '3months') return new Date(now.getFullYear(), now.getMonth() - 2, 1).toISOString().split('T')[0];
-    if (filter === 'year') return new Date(now.getFullYear(), 0, 1).toISOString().split('T')[0];
+    if (filter === 'month') {
+      now.setDate(1);
+      return getLocalISODate(now);
+    }
+    if (filter === '3months') {
+      now.setMonth(now.getMonth() - 2);
+      now.setDate(1);
+      return getLocalISODate(now);
+    }
+    if (filter === 'year') {
+      now.setMonth(0);
+      now.setDate(1);
+      return getLocalISODate(now);
+    }
     return null;
   };
 
-  // --- CORE ALL-TIME METRICS ---
+  // --- CORE ALL-TIME METRICS & SPLIT BALANCE LOGIC ---
   let totalBalance = 0;
+  let currentDebt = 0; 
+  let totalLoanFundedAssets = 0;
   const peopleBalances: Record<string, { id: string, name: string, balance: number }> = {};
 
   transactions.forEach((tx) => {
     const amt = Number(tx.amount);
+    
+    // 1. Calculate Main Wallet Balance (Cash inflow/outflow)
     if (['INCOME', 'BORROW', 'LEND_REPAYMENT'].includes(tx.type)) totalBalance += amt;
     if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT'].includes(tx.type)) totalBalance -= amt;
 
+    // 2. Calculate Active Debt for Unspent Loan Math
+    if (tx.type === 'BORROW') currentDebt += amt;
+    if (tx.type === 'BORROW_REPAYMENT') currentDebt -= amt;
+
+    // 3. Tally up Assets bought using Loan Funds via junction table data
+    if (tx.transaction_fundings && tx.transaction_fundings.length > 0) {
+      tx.transaction_fundings.forEach(funding => {
+        totalLoanFundedAssets += Number(funding.amount);
+      });
+    }
+
+    // 4. Calculate Individual Ledgers
     if (tx.person_id && tx.people_profiles) {
       if (!peopleBalances[tx.person_id]) peopleBalances[tx.person_id] = { id: tx.person_id, name: tx.people_profiles.name, balance: 0 };
       if (tx.type === 'LEND') peopleBalances[tx.person_id].balance += amt;
@@ -107,13 +162,21 @@ export default function DashboardClient({
     }
   });
 
+  // Split Balance Math: Unspent Loan is total debt minus the portion already spent on asset purchases
+  const unspentLoanMoney = Math.max(0, currentDebt - totalLoanFundedAssets);
+  const ownMoney = totalBalance - unspentLoanMoney;
+
   const owesYou = Object.values(peopleBalances).filter(p => p.balance > 0);
   const youOwe = Object.values(peopleBalances).filter(p => p.balance < 0);
-  const recentTransactions = [...transactions].reverse().slice(0, 3);
+  
+  const recentTransactions = transactions.slice(0, 5);
+
+  const totalOwesYou = owesYou.reduce((sum, p) => sum + p.balance, 0);
+  const totalYouOwe = youOwe.reduce((sum, p) => sum + Math.abs(p.balance), 0);
 
   // --- CHART & STATS FILTERING ---
   const chartStartDate = getStartDate(chartFilter);
-  const chartTxs = chartStartDate ? transactions.filter(t => t.date >= chartStartDate) : transactions;
+  const chartTxs = chartStartDate ? transactions.filter(t => t.date.split('T')[0] >= chartStartDate) : transactions;
 
   let filteredIncome = 0;
   let filteredExpense = 0;
@@ -166,14 +229,20 @@ export default function DashboardClient({
 
   // --- REPORT FILTERING ---
   const reportTxs = transactions.filter(t => {
+    const txDate = t.date.split('T')[0];
     if (reportFilter === 'custom') {
-      if (customStart && t.date < customStart) return false;
-      if (customEnd && t.date > customEnd) return false;
-      return true;
+      if (customStart && txDate < customStart) return false;
+      if (customEnd && txDate > customEnd) return false;
+    } else {
+      const rStart = getStartDate(reportFilter);
+      if (rStart && txDate < rStart) return false;
     }
-    const rStart = getStartDate(reportFilter);
-    return rStart ? t.date >= rStart : true;
-  }).reverse(); 
+    
+    if (reportType === 'INCOME' && t.type !== 'INCOME') return false;
+    if (reportType === 'EXPENSE' && t.type !== 'EXPENSE') return false;
+
+    return true;
+  }).reverse();
 
   let repIncome = 0, repExpense = 0, repLend = 0, repBorrow = 0;
   reportTxs.forEach(t => {
@@ -192,15 +261,21 @@ export default function DashboardClient({
     return type.charAt(0).toUpperCase() + type.slice(1).toLowerCase();
   };
 
+  const getReportTitle = () => {
+    if (reportType === 'INCOME') return 'Income Report';
+    if (reportType === 'EXPENSE') return 'Expense Report';
+    return 'Comprehensive Financial Report';
+  };
+
   const downloadCSV = () => {
-    let csv = `Financial Report\nGenerated on:,${new Date().toLocaleDateString()}\n\n`;
+    let csv = `${getReportTitle()}\nGenerated on:,${formatDate(new Date())}\n\n`;
     csv += "SL,Date,Category/Person,Type,Remarks,Method,Amount\n";
     
     reportTxs.forEach((tx, i) => {
       const name = tx.expense_profiles?.name || tx.people_profiles?.name || tx.source_or_method || 'Unknown';
       const remarks = `"${(tx.description || '').replace(/"/g, '""')}"`;
       const amtPrefix = ['EXPENSE', 'LEND', 'BORROW_REPAYMENT'].includes(tx.type) ? '-' : '+';
-      csv += `${i + 1},${new Date(tx.date).toLocaleDateString()},"${name}",${formatType(tx.type)},${remarks},${tx.transaction_method || ''},${amtPrefix}${tx.amount}\n`;
+      csv += `${i + 1},${formatDate(tx.date)},"${name}",${formatType(tx.type)},${remarks},${tx.transaction_method || ''},${amtPrefix}${tx.amount}\n`;
     });
 
     csv += `\n,,,,,Total Income,${repIncome}\n,,,,,Total Expense,-${repExpense}\n,,,,,Money Out (Loans/Payments),-${repLend}\n,,,,,Money In (Loans/Received),+${repBorrow}\n`;
@@ -208,7 +283,7 @@ export default function DashboardClient({
     const blob = new Blob(["\uFEFF" + csv], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    link.setAttribute("download", `Financial_Report.csv`);
+    link.setAttribute("download", `${getReportTitle().replace(/ /g, '_')}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -236,7 +311,7 @@ export default function DashboardClient({
           initial={{ y: -50, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}
           transition={{ type: 'spring', stiffness: 300, damping: 24 }}
-          className="px-6 pt-10 pb-6 flex justify-between items-center bg-blue-600 text-white rounded-b-[2rem] shadow-md"
+          className="sticky top-0 z-50 px-6 pt-10 pb-6 flex justify-between items-center bg-blue-600 text-white rounded-b-[2rem] shadow-md"
         >
           <div>
             <p className="text-blue-100 text-sm font-medium">Hello,</p>
@@ -264,17 +339,31 @@ export default function DashboardClient({
           animate="show"
           className="p-6 space-y-6 -mt-4 pb-36"
         >
-          {/* Main Balance */}
-          <motion.section variants={itemVariants} className="bg-white border border-slate-100 shadow-sm rounded-3xl p-6 flex flex-col items-center justify-center relative overflow-hidden">
-            <div className="absolute top-0 right-0 p-4 opacity-5"><Wallet className="h-24 w-24" /></div>
-            <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1 z-10">Current Cash Balance</p>
-            <h2 className="text-4xl font-extrabold text-slate-900 z-10">
-              ৳{totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            </h2>
+          {/* Split Balance Section */}
+          <motion.section variants={itemVariants} className="bg-white border border-slate-100 shadow-sm rounded-3xl p-6 flex flex-col relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-4 opacity-5"><Wallet className="h-32 w-32" /></div>
+            
+            <div className="text-center mb-6">
+              <p className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">Total Available Cash</p>
+              <h2 className="text-4xl font-extrabold text-slate-900">
+                ৳{totalBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </h2>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 border-t border-slate-100 pt-5">
+              <div className="text-center">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Your Own Money</p>
+                <p className="text-xl font-bold text-blue-600">৳{ownMoney.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              </div>
+              <div className="text-center border-l border-slate-100">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Unspent Loan</p>
+                <p className="text-xl font-bold text-orange-500">৳{unspentLoanMoney.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              </div>
+            </div>
           </motion.section>
 
           {/* Timeframe Filter Dropdown */}
-          <motion.div variants={itemVariants} className="flex items-center justify-between border-b border-slate-200 pb-2 relative z-50">
+          <motion.div variants={itemVariants} className="flex items-center justify-between border-b border-slate-200 pb-2">
             <h3 className="font-bold text-slate-800">Overview Metrics</h3>
             <div className="w-40">
               <CustomDropdown options={timeOptions} value={chartFilter} onChange={setChartFilter} />
@@ -282,7 +371,7 @@ export default function DashboardClient({
           </motion.div>
 
           {/* Dynamic Stats Cards */}
-          <motion.section variants={itemVariants} className="grid grid-cols-2 gap-4 relative z-10">
+          <motion.section variants={itemVariants} className="grid grid-cols-2 gap-4">
             <div className="bg-white border border-slate-100 p-4 rounded-2xl shadow-sm flex items-center gap-3">
               <div className="h-10 w-10 rounded-full bg-green-50 flex items-center justify-center shrink-0"><ArrowDownRight className="h-5 w-5 text-green-600" /></div>
               <div className="min-w-0">
@@ -299,7 +388,7 @@ export default function DashboardClient({
             </div>
           </motion.section>
 
-          <motion.section variants={itemVariants} className="bg-blue-50 border border-blue-100 p-4 rounded-2xl flex items-center justify-between shadow-sm relative z-10">
+          <motion.section variants={itemVariants} className="bg-blue-50 border border-blue-100 p-4 rounded-2xl flex items-center justify-between shadow-sm">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 bg-blue-100 rounded-full flex items-center justify-center text-blue-600"><Activity className="h-5 w-5" /></div>
               <div>
@@ -315,27 +404,41 @@ export default function DashboardClient({
 
           {/* Conditional Ledger Sections */}
           {(owesYou.length > 0 || youOwe.length > 0) && (
-            <motion.div variants={itemVariants} className="grid grid-cols-2 gap-4 relative z-10">
+            <motion.div variants={itemVariants} className="grid grid-cols-2 gap-4">
+              
               {owesYou.length > 0 && (
                 <section className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col">
-                  <div className="flex items-center gap-2 mb-3"><Users className="h-4 w-4 text-green-600" /><h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">They Owe You</h3></div>
-                  <div className="space-y-2">
+                  <div className="flex justify-between items-center mb-3 border-b border-slate-100 pb-2">
+                    <div className="flex items-center gap-2">
+                      <Users className="h-4 w-4 text-green-600" />
+                      <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">They Owe You</h3>
+                    </div>
+                    <span className="text-xs font-bold text-green-600">৳{totalOwesYou.toLocaleString()}</span>
+                  </div>
+                  <div className="space-y-2 max-h-[190px] overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full">
                     {owesYou.map(p => (
-                      <Link key={p.id} href={`/dashboard/ledger/${p.id}`} className="flex justify-between items-center group">
-                        <span className="text-sm font-semibold text-slate-700 group-hover:text-blue-600 break-words pr-2">{p.name}</span>
+                      <Link key={p.id} href={`/dashboard/ledger/${p.id}`} className="flex justify-between items-center group py-1 border-b border-transparent hover:border-slate-50">
+                        <span className="text-sm font-semibold text-slate-700 group-hover:text-blue-600 break-words pr-2 truncate">{p.name}</span>
                         <span className="text-sm font-bold text-green-600 whitespace-nowrap">৳{p.balance.toLocaleString()}</span>
                       </Link>
                     ))}
                   </div>
                 </section>
               )}
+
               {youOwe.length > 0 && (
                 <section className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm flex flex-col">
-                  <div className="flex items-center gap-2 mb-3"><Users className="h-4 w-4 text-red-600" /><h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">You Owe Them</h3></div>
-                  <div className="space-y-2">
+                  <div className="flex justify-between items-center mb-3 border-b border-slate-100 pb-2">
+                    <div className="flex items-center gap-2">
+                      <Users className="h-4 w-4 text-red-600" />
+                      <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">You Owe Them</h3>
+                    </div>
+                    <span className="text-xs font-bold text-red-600">৳{totalYouOwe.toLocaleString()}</span>
+                  </div>
+                  <div className="space-y-2 max-h-[190px] overflow-y-auto pr-1 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-thumb]:bg-slate-200 [&::-webkit-scrollbar-thumb]:rounded-full">
                     {youOwe.map(p => (
-                      <Link key={p.id} href={`/dashboard/ledger/${p.id}`} className="flex justify-between items-center group">
-                        <span className="text-sm font-semibold text-slate-700 group-hover:text-blue-600 break-words pr-2">{p.name}</span>
+                      <Link key={p.id} href={`/dashboard/ledger/${p.id}`} className="flex justify-between items-center group py-1 border-b border-transparent hover:border-slate-50">
+                        <span className="text-sm font-semibold text-slate-700 group-hover:text-blue-600 break-words pr-2 truncate">{p.name}</span>
                         <span className="text-sm font-bold text-red-600 whitespace-nowrap">৳{Math.abs(p.balance).toLocaleString()}</span>
                       </Link>
                     ))}
@@ -346,12 +449,12 @@ export default function DashboardClient({
           )}
 
           {/* Charts */}
-          <motion.div variants={itemVariants} className="relative z-10">
+          <motion.div variants={itemVariants}>
             <DashboardCharts monthlyData={prepareChartData()} categoryData={categoryData} />
           </motion.div>
 
           {/* Recent Transactions */}
-          <motion.section variants={itemVariants} className="relative z-10">
+          <motion.section variants={itemVariants}>
             <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider flex items-center gap-2 mb-4 mt-2"><History className="h-4 w-4" /> Recent Transactions</h3>
             <div className="space-y-3">
               {recentTransactions.length === 0 ? <p className="text-center text-slate-400 py-6 bg-white rounded-2xl border border-dashed border-slate-200">No recent activity.</p> :
@@ -403,7 +506,7 @@ export default function DashboardClient({
                         <div className={`h-10 w-10 rounded-full flex items-center justify-center border shrink-0 ${bgClass}`}><Icon className={`h-5 w-5 ${colorClass}`} /></div>
                         <div className="flex-1 min-w-0">
                           <p className="font-semibold text-slate-900 leading-tight break-words">{displayName}</p>
-                          <p className="text-xs text-slate-500 mt-1 break-words">{new Date(tx.date).toLocaleDateString()} • {tx.transaction_method || 'Unknown'}</p>
+                          <p className="text-xs text-slate-500 mt-1 break-words">{formatDate(tx.date)} • {tx.transaction_method || 'Unknown'}</p>
                         </div>
                       </div>
                       <p className={`font-bold shrink-0 whitespace-nowrap pl-2 ${colorClass}`}>{isPositive ? '+' : '-'}৳{Number(tx.amount).toLocaleString()}</p>
@@ -415,30 +518,34 @@ export default function DashboardClient({
           </motion.section>
 
           {/* --- REPORT GENERATOR SECTION --- */}
-          <motion.section variants={itemVariants} className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm mt-8 relative z-20">
+          <motion.section variants={itemVariants} className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm mt-8">
             <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2 mb-4">
               <Download className="h-5 w-5 text-blue-600" /> Generate Reports
             </h3>
+            
             <div className="space-y-4">
-              
-              <div className="relative z-[60]">
+              <div>
+                <CustomDropdown label="Report Category" options={reportTypeOptions} value={reportType} onChange={setReportType} />
+              </div>
+
+              <div>
                 <CustomDropdown label="Select Timeframe" options={reportOptions} value={reportFilter} onChange={setReportFilter} />
               </div>
 
               {reportFilter === 'custom' && (
-                <div className="grid grid-cols-2 gap-4 relative z-40">
+                <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1.5">From</label>
-                    <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} className="w-full h-12 px-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 bg-white" />
+                    <input type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} className="w-full h-12 px-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 bg-white text-slate-900" />
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-1.5">To</label>
-                    <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} className="w-full h-12 px-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 bg-white" />
+                    <input type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} className="w-full h-12 px-4 rounded-xl border border-slate-200 focus:ring-2 focus:ring-blue-500 bg-white text-slate-900" />
                   </div>
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-3 pt-2 relative z-10">
+              <div className="grid grid-cols-2 gap-3 pt-2">
                 <button onClick={downloadCSV} className="h-12 bg-green-50 text-green-700 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-green-100 transition-colors">
                   <FileSpreadsheet className="h-5 w-5" /> Export Excel
                 </button>
@@ -455,9 +562,11 @@ export default function DashboardClient({
       {/* --- HIDDEN PDF REPORT TEMPLATE --- */}
       <div className="hidden print:block print-wrapper bg-white text-black font-sans min-h-screen pt-4">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-slate-900 mb-2">Comprehensive Financial Report</h1>
-          <p className="text-sm text-slate-500 mt-1">Generated on: {new Date().toLocaleDateString()}</p>
-          <p className="text-sm font-bold text-blue-600 mt-1 uppercase">Filter: {reportOptions.find(o => o.value === reportFilter)?.label || ''} {reportFilter === 'custom' && `(${customStart} to ${customEnd})`}</p>
+          <h1 className="text-3xl font-bold text-slate-900 mb-2">{getReportTitle()}</h1>
+          <p className="text-sm text-slate-500 mt-1">Generated on: {formatDate(new Date())}</p>
+          <p className="text-sm font-bold text-blue-600 mt-1 uppercase">
+            Filter: {reportOptions.find(o => o.value === reportFilter)?.label || ''} {reportFilter === 'custom' && `(${formatDate(customStart)} to ${formatDate(customEnd)})`}
+          </p>
         </div>
         
         <table className="w-full border-collapse border border-slate-300 text-sm mb-6 text-left table-auto">
@@ -479,7 +588,7 @@ export default function DashboardClient({
               return (
                 <tr key={tx.id} className="hover:bg-slate-50 break-inside-avoid">
                   <td className="border border-slate-300 px-4 py-3 text-center">{index + 1}</td>
-                  <td className="border border-slate-300 px-4 py-3 whitespace-nowrap">{new Date(tx.date).toLocaleDateString()}</td>
+                  <td className="border border-slate-300 px-4 py-3 whitespace-nowrap">{formatDate(tx.date)}</td>
                   <td className="border border-slate-300 px-4 py-3 font-medium">{name}</td>
                   <td className="border border-slate-300 px-4 py-3">{formatType(tx.type)}</td>
                   <td className="border border-slate-300 px-4 py-3 break-words min-w-[150px]">{tx.description}</td>
