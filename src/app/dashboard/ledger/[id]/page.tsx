@@ -539,7 +539,7 @@ export default function PersonLedgerPage() {
 
   const formatNumericBalance = (balance: number) => {
     if (balance > 0) return `+${balance}`;
-    if (balance < 0) return `${balance}`; // includes minus naturally
+    if (balance < 0) return `${balance}`; 
     return `0`;
   };
 
@@ -558,8 +558,12 @@ export default function PersonLedgerPage() {
     csvContent += "SL (ক্রমিক),Date (তারিখ),Type (ধরন),Remarks (মন্তব্য),Method (মাধ্যম),Taken (গ্রহণ),Given (প্রদান),Balance (জের)\n";
     
     chronologicalTxs.forEach(row => {
-      const safeRemarks = `"${(row.description || '').replace(/"/g, '""')}"`;
-      // Changed to formatNumericBalance for clean numeric output
+      let cleanRemarks = row.description 
+        ? row.description.replace('(Edited)', '').replace(/^Funded Asset:\s*/i, '').trim() 
+        : '-';
+      if (!cleanRemarks) cleanRemarks = '-';
+
+      const safeRemarks = `"${cleanRemarks.replace(/"/g, '""')}"`;
       csvContent += `${row.index + 1},${formatDate(row.date)},"${row.displayType}",${safeRemarks},${row.transaction_method || '-'},${row.taken},${row.given},${formatNumericBalance(row.runningBalanceAmt)}\n`;
     });
 
@@ -601,6 +605,11 @@ export default function PersonLedgerPage() {
       default: return { title: '', bg: '', color: '' };
     }
   };
+
+  // Determine active click filters
+  const loanFilterTarget = netBalance > 0 ? 'LEND' : 'BORROW';
+  const isLoanFilterActive = filterType === loanFilterTarget;
+  const isAssetFilterActive = filterType === 'ASSET_PURCHASE';
 
   if (isLoading) return <div className="min-h-screen flex items-center justify-center text-slate-400">Loading ledger...</div>;
   if (!person) return <div className="min-h-screen flex items-center justify-center text-slate-400">Person not found</div>;
@@ -727,18 +736,24 @@ export default function PersonLedgerPage() {
             </div>
           </motion.div>
 
-          {/* INTERACTIVE METRIC CARDS */}
+          {/* INTERACTIVE METRIC CARDS WITH TOGGLE FILTERS */}
           <motion.div variants={itemVariants} className="px-6 mb-4 grid grid-cols-3 gap-3">
             <div 
-              onClick={() => { setFilterType(netBalance > 0 ? 'LEND' : 'BORROW'); setCurrentPage(1); }}
-              className={`bg-white border p-3 rounded-2xl shadow-sm flex flex-col items-center justify-center text-center cursor-pointer hover:shadow-md transition-all active:scale-95 ${['BORROW', 'LEND'].includes(filterType) ? 'border-slate-400 ring-2 ring-slate-200' : 'border-slate-200 hover:border-slate-300'}`}
+              onClick={() => { 
+                setFilterType(isLoanFilterActive ? 'ALL' : loanFilterTarget); 
+                setCurrentPage(1); 
+              }}
+              className={`bg-white border p-3 rounded-2xl shadow-sm flex flex-col items-center justify-center text-center cursor-pointer hover:shadow-md transition-all active:scale-95 ${isLoanFilterActive ? 'border-slate-400 ring-2 ring-slate-200' : 'border-slate-200 hover:border-slate-300'}`}
             >
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Loan Total</span>
               <span className="text-sm font-bold text-slate-800">৳{activeLoanTotal.toLocaleString()}</span>
             </div>
             <div 
-              onClick={() => { setFilterType('ASSET_PURCHASE'); setCurrentPage(1); }}
-              className={`bg-blue-50 border p-3 rounded-2xl shadow-sm flex flex-col items-center justify-center text-center cursor-pointer hover:shadow-md transition-all active:scale-95 ${filterType === 'ASSET_PURCHASE' ? 'border-blue-400 ring-2 ring-blue-200' : 'border-blue-100 hover:border-blue-300'}`}
+              onClick={() => { 
+                setFilterType(isAssetFilterActive ? 'ALL' : 'ASSET_PURCHASE'); 
+                setCurrentPage(1); 
+              }}
+              className={`bg-blue-50 border p-3 rounded-2xl shadow-sm flex flex-col items-center justify-center text-center cursor-pointer hover:shadow-md transition-all active:scale-95 ${isAssetFilterActive ? 'border-blue-400 ring-2 ring-blue-200' : 'border-blue-100 hover:border-blue-300'}`}
             >
               <span className="text-[10px] font-bold text-blue-500 uppercase tracking-wider mb-1">Asset Total</span>
               <span className="text-sm font-bold text-blue-700">৳{totalAssetPurchases.toLocaleString()}</span>
@@ -809,15 +824,20 @@ export default function PersonLedgerPage() {
                   const isExpanded = expandedTxId === tx.id;
                   const isAsset = tx.type === 'ASSET_PURCHASE';
                   
+                  let cleanRemarks = tx.description 
+                    ? tx.description.replace('(Edited)', '').replace(/^Funded Asset:\s*/i, '').trim() 
+                    : '-';
+                  if (!cleanRemarks) cleanRemarks = '-';
+                  
                   return (
                     <motion.div 
                       key={tx.id} 
                       variants={itemVariants}
                       className={`bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-300 ${isAsset ? 'border-blue-100' : 'border-slate-100'}`}
                     >
-                      <div className="flex items-center justify-between p-4 cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => setExpandedTxId(isExpanded ? null : tx.id)}>
-                        <div className="flex items-center gap-3">
-                          <div className={`h-10 w-10 rounded-full flex items-center justify-center border shrink-0 transition-colors ${
+                      <div className="flex items-start justify-between p-4 cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => setExpandedTxId(isExpanded ? null : tx.id)}>
+                        <div className="flex items-start gap-3 flex-1 min-w-0 pr-4">
+                          <div className={`h-10 w-10 mt-0.5 rounded-full flex items-center justify-center border shrink-0 transition-colors ${
                             isAsset ? 'bg-blue-50 border-blue-100' :
                             ['LEND', 'BORROW_REPAYMENT'].includes(tx.type) ? 'bg-red-50 border-red-100' : 'bg-green-50 border-green-100'
                           }`}>
@@ -827,28 +847,38 @@ export default function PersonLedgerPage() {
                             {tx.type === 'BORROW_REPAYMENT' && <Wallet className="h-5 w-5 text-red-600" />}
                             {tx.type === 'ASSET_PURCHASE' && <ShoppingBag className="h-5 w-5 text-blue-600" />}
                           </div>
-                          <div>
+                          <div className="flex flex-col flex-1 min-w-0">
                             <div className="flex items-center gap-1">
-                              <p className="font-semibold text-slate-900 leading-tight">
+                              <p className="font-semibold text-slate-900 leading-tight truncate">
                                 {tx.type === 'LEND' && 'Loan Given'}
                                 {tx.type === 'BORROW' && 'Loan Taken'}
                                 {tx.type === 'LEND_REPAYMENT' && 'Received Installment'}
                                 {tx.type === 'BORROW_REPAYMENT' && 'Paid Installment'}
                                 {tx.type === 'ASSET_PURCHASE' && 'Asset Purchase'}
                               </p>
-                              <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`} />
+                              <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`} />
                             </div>
-                            <p className="text-xs text-slate-500 mt-0.5">{formatDate(tx.date)}</p>
+                            <p className="text-[11px] text-slate-500 mt-0.5 truncate">{formatDate(tx.date)} • {tx.transaction_method || '-'}</p>
+                            
+                            {!isExpanded && (
+                              <p className="text-[11px] text-slate-400 mt-1 line-clamp-2 h-[32px] leading-[16px] whitespace-normal">
+                                {cleanRemarks !== '-' ? cleanRemarks : ''}
+                              </p>
+                            )}
                           </div>
                         </div>
                         
-                        <div className="text-right">
+                        <div className="text-right flex flex-col items-end shrink-0">
                           <p className={`font-bold ${isAsset ? 'text-blue-600' : ['LEND', 'BORROW_REPAYMENT'].includes(tx.type) ? 'text-red-600' : 'text-green-600'}`}>
                             {isAsset ? '' : ['LEND', 'BORROW_REPAYMENT'].includes(tx.type) ? '-' : '+'}৳{Number(tx.amount).toLocaleString()}
                           </p>
-                          <p className={`text-[11px] font-bold mt-0.5 ${isAsset ? 'text-slate-400' : tx.runningBalanceAmt === 0 ? 'text-slate-400' : tx.runningBalanceAmt > 0 ? 'text-green-600' : 'text-red-600'}`}>
-                            {isAsset ? 'Funded by Loan' : tx.shortBalanceText}
-                          </p>
+                          
+                          {/* Hide 'Funded by Loan' if unexpanded */}
+                          {!(isAsset && !isExpanded) && (
+                            <p className={`text-[11px] font-bold mt-0.5 ${isAsset ? 'text-slate-400' : tx.runningBalanceAmt === 0 ? 'text-slate-400' : tx.runningBalanceAmt > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                              {isAsset ? 'Funded by Loan' : tx.shortBalanceText}
+                            </p>
+                          )}
                         </div>
                       </div>
 
@@ -860,8 +890,8 @@ export default function PersonLedgerPage() {
                               <p className="text-slate-900">{tx.transaction_method || '-'}</p>
                             </div>
                             <div>
-                              <p className="text-slate-500 font-medium text-xs mb-1">Remarks / Reason</p>
-                              <p className={`text-slate-900 ${tx.description?.includes('(Edited)') ? 'italic' : ''}`}>{tx.description || 'None provided'}</p>
+                              <p className="text-slate-500 font-medium text-xs mb-1">Remarks</p>
+                              <p className={`text-slate-900 ${tx.description?.includes('(Edited)') ? 'italic' : ''}`}>{cleanRemarks}</p>
                             </div>
                           </div>
                           
@@ -1081,7 +1111,9 @@ export default function PersonLedgerPage() {
                 <td className="border border-slate-300 px-4 py-3 text-center">{row.index + 1}</td>
                 <td className="border border-slate-300 px-4 py-3 whitespace-nowrap">{formatDate(row.date)}</td>
                 <td className="border border-slate-300 px-4 py-3 font-medium whitespace-nowrap">{row.displayType}</td>
-                <td className="border border-slate-300 px-4 py-3 break-words min-w-[150px]">{row.description}</td>
+                <td className="border border-slate-300 px-4 py-3 break-words min-w-[150px]">
+                  {row.description ? row.description.replace('(Edited)', '').replace(/^Funded Asset:\s*/i, '').trim() : '-'}
+                </td>
                 <td className="border border-slate-300 px-4 py-3 whitespace-nowrap">{row.transaction_method || '-'}</td>
                 <td className="border border-slate-300 px-4 py-3 text-green-700 font-medium whitespace-nowrap">{row.taken}</td>
                 <td className="border border-slate-300 px-4 py-3 text-red-700 font-medium whitespace-nowrap">{row.given}</td>
