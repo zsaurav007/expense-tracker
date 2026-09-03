@@ -477,11 +477,11 @@ export default function PersonLedgerPage() {
     let fullBalanceText = 'Accounts Settled (হিসাব সম্পন্ন)';
     
     if (runningBalance > 0) {
-      shortBalanceText = `They owe ৳${Math.abs(runningBalance).toLocaleString()}`;
-      fullBalanceText = `They owe you ৳${Math.abs(runningBalance).toLocaleString()} (তারা আপনার কাছে ঋণী ৳${Math.abs(runningBalance).toLocaleString()})`;
+      shortBalanceText = `Loan Receivable ৳${Math.abs(runningBalance).toLocaleString()}`;
+      fullBalanceText = `Loan Receivable ৳${Math.abs(runningBalance).toLocaleString()} (তারা আপনার কাছে ঋণী ৳${Math.abs(runningBalance).toLocaleString()})`;
     } else if (runningBalance < 0) {
-      shortBalanceText = `You owe ৳${Math.abs(runningBalance).toLocaleString()}`;
-      fullBalanceText = `You owe them ৳${Math.abs(runningBalance).toLocaleString()} (আপনি তাদের কাছে ঋণী ৳${Math.abs(runningBalance).toLocaleString()})`;
+      shortBalanceText = `Loan Payable ৳${Math.abs(runningBalance).toLocaleString()}`;
+      fullBalanceText = `Loan Payable ৳${Math.abs(runningBalance).toLocaleString()} (আপনি তাদের কাছে ঋণী ৳${Math.abs(runningBalance).toLocaleString()})`;
     }
 
     return { 
@@ -544,9 +544,9 @@ export default function PersonLedgerPage() {
   };
 
   const finalBalanceText = netBalance > 0 
-    ? `They owe you ৳${Math.abs(netBalance).toLocaleString()} (তারা আপনার কাছে ঋণী ৳${Math.abs(netBalance).toLocaleString()})` 
+    ? `Loan Receivable ৳${Math.abs(netBalance).toLocaleString()} (তারা আপনার কাছে ঋণী ৳${Math.abs(netBalance).toLocaleString()})` 
     : netBalance < 0 
-      ? `You owe them ৳${Math.abs(netBalance).toLocaleString()} (আপনি তাদের কাছে ঋণী ৳${Math.abs(netBalance).toLocaleString()})` 
+      ? `Loan Payable ৳${Math.abs(netBalance).toLocaleString()} (আপনি তাদের কাছে ঋণী ৳${Math.abs(netBalance).toLocaleString()})` 
       : 'Accounts Settled (হিসাব সম্পন্ন)';
 
   const downloadCSV = () => {
@@ -730,7 +730,7 @@ export default function PersonLedgerPage() {
               netBalance < 0 ? 'bg-red-600 border-red-700 text-white' : 'bg-white border-slate-200 text-slate-800'
             }`}>
               <p className="text-sm font-medium mb-2 opacity-90">
-                {netBalance > 0 ? `${person.name} owes you` : netBalance < 0 ? `You owe ${person.name}` : 'Accounts Settled'}
+                {netBalance > 0 ? `Loan Receivable from ${person.name}` : netBalance < 0 ? `Loan Payable to ${person.name}` : 'Accounts Settled'}
               </p>
               <h2 className="text-5xl font-extrabold tracking-tight">৳{Math.abs(netBalance).toLocaleString()}</h2>
             </div>
@@ -776,7 +776,7 @@ export default function PersonLedgerPage() {
             <div className="flex justify-between items-center pt-2 border-t border-slate-100 mt-1">
               <span className="text-slate-700 font-bold">Adjusted Balance:</span>
               <span className={`font-bold ${netBalance > 0 ? 'text-green-600' : netBalance < 0 ? 'text-red-600' : 'text-slate-900'}`}>
-                {netBalance > 0 ? `They owe ৳${Math.abs(netBalance).toLocaleString()}` : netBalance < 0 ? `You owe ৳${Math.abs(netBalance).toLocaleString()}` : 'Settled'}
+                {netBalance > 0 ? `Loan Receivable ৳${Math.abs(netBalance).toLocaleString()}` : netBalance < 0 ? `Loan Payable ৳${Math.abs(netBalance).toLocaleString()}` : 'Settled'}
               </span>
             </div>
           </motion.div>

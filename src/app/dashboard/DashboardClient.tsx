@@ -434,7 +434,7 @@ export default function DashboardClient({
                 <div className="flex justify-between items-center mb-3 border-b border-slate-100 pb-2">
                   <div className="flex items-center gap-2">
                     <Users className="h-4 w-4 text-green-600" />
-                    <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">They Owe You</h3>
+                    <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Loan Receivable</h3>
                   </div>
                   <span className="text-xs font-bold text-green-600">৳{totalOwesYou.toLocaleString()}</span>
                 </div>
@@ -454,7 +454,7 @@ export default function DashboardClient({
                 <div className="flex justify-between items-center mb-3 border-b border-slate-100 pb-2">
                   <div className="flex items-center gap-2">
                     <Users className="h-4 w-4 text-red-600" />
-                    <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">You Owe Them</h3>
+                    <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Loan Payable</h3>
                   </div>
                   <span className="text-xs font-bold text-red-600">৳{totalYouOwe.toLocaleString()}</span>
                 </div>

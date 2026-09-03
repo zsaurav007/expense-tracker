@@ -355,7 +355,7 @@ export default function LedgerHubPage() {
             }}
             className={`bg-green-50 border p-4 rounded-2xl flex flex-col justify-center shadow-sm cursor-pointer hover:shadow-md transition-all active:scale-95 ${filterType === 'OWES_ME' ? 'border-green-400 ring-2 ring-green-200' : 'border-green-100 hover:border-green-300'}`}
           >
-            <span className="text-xs text-green-700 font-medium mb-1">Total Owed to You</span>
+            <span className="text-xs text-green-700 font-medium mb-1">Loan Receivable</span>
             <span className="text-lg font-bold text-green-700">৳{totalOwesMe.toLocaleString()}</span>
           </div>
           <div 
@@ -365,7 +365,7 @@ export default function LedgerHubPage() {
             }}
             className={`bg-red-50 border p-4 rounded-2xl flex flex-col justify-center shadow-sm cursor-pointer hover:shadow-md transition-all active:scale-95 ${filterType === 'I_OWE' ? 'border-red-400 ring-2 ring-red-200' : 'border-red-100 hover:border-red-300'}`}
           >
-            <span className="text-xs text-red-700 font-medium mb-1">Total You Owe</span>
+            <span className="text-xs text-red-700 font-medium mb-1">Loan Payable</span>
             <span className="text-lg font-bold text-red-700">৳{totalIOwe.toLocaleString()}</span>
           </div>
         </motion.div>
@@ -409,8 +409,8 @@ export default function LedgerHubPage() {
                         </p>
                       )}
                       <div className="mt-1">
-                        {person.netBalance > 0 && <p className="text-sm font-bold text-green-600">Owes you ৳{person.netBalance.toLocaleString()}</p>}
-                        {person.netBalance < 0 && <p className="text-sm font-bold text-red-600">You owe ৳{Math.abs(person.netBalance).toLocaleString()}</p>}
+                        {person.netBalance > 0 && <p className="text-sm font-bold text-green-600">Loan Receivable ৳{person.netBalance.toLocaleString()}</p>}
+                        {person.netBalance < 0 && <p className="text-sm font-bold text-red-600">Loan Payable ৳{Math.abs(person.netBalance).toLocaleString()}</p>}
                         {person.netBalance === 0 && <p className="text-sm font-bold text-slate-400">Settled up</p>}
                       </div>
                     </div>
