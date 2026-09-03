@@ -349,14 +349,20 @@ export default function LedgerHubPage() {
       >
         <motion.div variants={itemVariants} className="p-6 grid grid-cols-2 gap-4">
           <div 
-            onClick={() => { setFilterType('OWES_ME'); setCurrentPage(1); }}
+            onClick={() => { 
+              setFilterType(filterType === 'OWES_ME' ? 'ALL' : 'OWES_ME'); 
+              setCurrentPage(1); 
+            }}
             className={`bg-green-50 border p-4 rounded-2xl flex flex-col justify-center shadow-sm cursor-pointer hover:shadow-md transition-all active:scale-95 ${filterType === 'OWES_ME' ? 'border-green-400 ring-2 ring-green-200' : 'border-green-100 hover:border-green-300'}`}
           >
             <span className="text-xs text-green-700 font-medium mb-1">Total Owed to You</span>
             <span className="text-lg font-bold text-green-700">৳{totalOwesMe.toLocaleString()}</span>
           </div>
           <div 
-            onClick={() => { setFilterType('I_OWE'); setCurrentPage(1); }}
+            onClick={() => { 
+              setFilterType(filterType === 'I_OWE' ? 'ALL' : 'I_OWE'); 
+              setCurrentPage(1); 
+            }}
             className={`bg-red-50 border p-4 rounded-2xl flex flex-col justify-center shadow-sm cursor-pointer hover:shadow-md transition-all active:scale-95 ${filterType === 'I_OWE' ? 'border-red-400 ring-2 ring-red-200' : 'border-red-100 hover:border-red-300'}`}
           >
             <span className="text-xs text-red-700 font-medium mb-1">Total You Owe</span>
