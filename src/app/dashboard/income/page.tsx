@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { Plus, ArrowDownRight, HandCoins, ChevronRight, Edit, Trash2, X } from 'lucide-react';
 import CustomDropdown from '@/components/CustomDropdown';
+import { TopControls, PaginationControls } from '@/components/ListControls';
 
 // --- TYPESCRIPT DEFINITIONS ---
 type Transaction = {
@@ -39,6 +40,27 @@ export default function IncomePage() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
+  
+  // --- LIST CONTROLS STATE ---
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterType, setFilterType] = useState('ALL');
+  const [sortOrder, setSortOrder] = useState('date-desc');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(20);
+
+  const filterOptions = [
+    { label: 'All Types', value: 'ALL' },
+    { label: 'General Income', value: 'INCOME' },
+    { label: 'Loans Taken', value: 'BORROW' },
+    { label: 'Installments Received', value: 'LEND_REPAYMENT' },
+  ];
+
+  const sortOptions = [
+    { label: 'Newest First', value: 'date-desc' },
+    { label: 'Oldest First', value: 'date-asc' },
+    { label: 'Highest Amount', value: 'amount-desc' },
+    { label: 'Lowest Amount', value: 'amount-asc' },
+  ];
   
   // --- MODAL & FORM STATE ---
   const [showModal, setShowModal] = useState(false);
@@ -98,11 +120,8 @@ export default function IncomePage() {
     setEditingTxId(null);
   };
 
-  // --- ACTIONS ---
   const handleEditClick = (tx: Transaction, e: React.MouseEvent) => {
-    e.preventDefault(); 
-    e.stopPropagation();
-    
+    e.preventDefault(); e.stopPropagation();
     setEditingTxId(tx.id);
     setAmount(tx.amount.toString());
     setSource(tx.source_or_method);
@@ -113,18 +132,12 @@ export default function IncomePage() {
   };
 
   const handleDeleteClick = async (id: string, e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
+    e.preventDefault(); e.stopPropagation();
     if (!window.confirm("Are you sure you want to delete this income record?")) return;
-    
     try {
       const res = await fetch(`/api/transactions/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        fetchIncome();
-      } else {
-        alert("Failed to delete the record.");
-      }
+      if (res.ok) fetchIncome();
+      else alert("Failed to delete the record.");
     } catch (error) {
       alert("An error occurred while deleting.");
     }
@@ -133,31 +146,14 @@ export default function IncomePage() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
-    
-    const payload = { 
-      type: 'INCOME', 
-      amount: parseFloat(amount), 
-      source, 
-      method, 
-      date, 
-      description 
-    };
+    const payload = { type: 'INCOME', amount: parseFloat(amount), source, method, date, description };
 
     try {
-      let res;
-      if (editingTxId) {
-        res = await fetch(`/api/transactions/${editingTxId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-      } else {
-        res = await fetch('/api/transactions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-      }
+      const res = await fetch(editingTxId ? `/api/transactions/${editingTxId}` : '/api/transactions', {
+        method: editingTxId ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
 
       if (res.ok) {
         setShowModal(false);
@@ -173,12 +169,47 @@ export default function IncomePage() {
     }
   };
 
+  // --- DATA PROCESSING (Search, Filter, Sort, Pagination) ---
+  const processedTransactions = useMemo(() => {
+    let result = [...transactions];
+
+    if (filterType !== 'ALL') {
+      result = result.filter(tx => tx.type === filterType);
+    }
+
+    if (searchTerm) {
+      const lowerTerm = searchTerm.toLowerCase();
+      result = result.filter(tx => 
+        tx.source_or_method?.toLowerCase().includes(lowerTerm) ||
+        tx.description?.toLowerCase().includes(lowerTerm) ||
+        tx.transaction_method?.toLowerCase().includes(lowerTerm) ||
+        tx.people_profiles?.name?.toLowerCase().includes(lowerTerm)
+      );
+    }
+
+    result.sort((a, b) => {
+      if (sortOrder === 'date-desc') return new Date(b.date).getTime() - new Date(a.date).getTime();
+      if (sortOrder === 'date-asc') return new Date(a.date).getTime() - new Date(b.date).getTime();
+      if (sortOrder === 'amount-desc') return Number(b.amount) - Number(a.amount);
+      if (sortOrder === 'amount-asc') return Number(a.amount) - Number(b.amount);
+      return 0;
+    });
+
+    return result;
+  }, [transactions, searchTerm, filterType, sortOrder]);
+
+  const totalPages = Math.ceil(processedTransactions.length / itemsPerPage) || 1;
+  const paginatedTransactions = processedTransactions.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
   return (
     <div className="flex flex-col min-h-screen bg-slate-50 relative">
       <motion.header 
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        className="px-6 pt-8 pb-4 bg-white border-b border-slate-100 flex justify-between items-center sticky top-0 z-10"
+        className="px-6 pt-8 pb-4 bg-white border-b border-slate-100 flex justify-between items-center sticky top-0 z-30"
       >
         <h1 className="text-xl font-bold text-slate-900">Income</h1>
         <button 
@@ -189,6 +220,19 @@ export default function IncomePage() {
         </button>
       </motion.header>
 
+      {/* REUSABLE LIST CONTROLS */}
+      <TopControls 
+        searchTerm={searchTerm} 
+        setSearchTerm={(val) => { setSearchTerm(val); setCurrentPage(1); }} 
+        filterType={filterType} 
+        setFilterType={(val) => { setFilterType(val); setCurrentPage(1); }} 
+        filterOptions={filterOptions} 
+        sortOrder={sortOrder} 
+        setSortOrder={(val) => { setSortOrder(val); setCurrentPage(1); }} 
+        sortOptions={sortOptions} 
+        searchPlaceholder="Search income records..."
+      />
+
       <motion.div 
         variants={containerVariants}
         initial="hidden"
@@ -196,8 +240,8 @@ export default function IncomePage() {
         className="p-6 pb-24 space-y-3"
       >
         {isLoading ? <p className="text-center text-slate-400 py-8">Loading...</p> : 
-         transactions.length === 0 ? <p className="text-center text-slate-400 py-8 bg-white rounded-2xl border border-dashed border-slate-200">No income records yet.</p> :
-         transactions.map((tx) => {
+         paginatedTransactions.length === 0 ? <p className="text-center text-slate-400 py-8 bg-white rounded-2xl border border-dashed border-slate-200">No income records found.</p> :
+         paginatedTransactions.map((tx) => {
            
            let Icon = ArrowDownRight;
            let displayName = tx.source_or_method;
@@ -263,6 +307,20 @@ export default function IncomePage() {
              </motion.div>
            );
          })}
+
+         {/* REUSABLE PAGINATION CONTROLS */}
+         {!isLoading && (
+           <motion.div variants={itemVariants}>
+             <PaginationControls 
+                currentPage={currentPage} 
+                totalPages={totalPages} 
+                itemsPerPage={itemsPerPage} 
+                setItemsPerPage={setItemsPerPage} 
+                setCurrentPage={setCurrentPage} 
+                totalItems={processedTransactions.length}
+             />
+           </motion.div>
+         )}
       </motion.div>
 
       {/* --- ANIMATED MODAL --- */}
@@ -307,15 +365,15 @@ export default function IncomePage() {
                       />
                     </div>
                     
-                    <div>
+                    <div className="relative z-50">
                       <CustomDropdown label="Source" options={sources} value={source} onChange={setSource} onAdd={handleAddSource} addLabel="Add source" />
                     </div>
                     
-                    <div>
+                    <div className="relative z-40">
                       <CustomDropdown label="Method" options={methods} value={method} onChange={setMethod} onAdd={handleAddMethod} addLabel="Add method" />
                     </div>
                     
-                    <div>
+                    <div className="relative z-30">
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Date</label>
                       <input 
                         type="date" required 
@@ -324,7 +382,7 @@ export default function IncomePage() {
                       />
                     </div>
                     
-                    <div>
+                    <div className="relative z-20">
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Description (Optional)</label>
                       <input 
                         type="text" 

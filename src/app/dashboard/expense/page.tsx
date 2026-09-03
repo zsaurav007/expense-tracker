@@ -1,11 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { Plus, ArrowUpRight, FolderOpen, ChevronRight, Wallet, Edit, Trash2, X } from 'lucide-react';
 import CustomDropdown from '@/components/CustomDropdown';
+import { TopControls, PaginationControls } from '@/components/ListControls';
 
 // --- TYPESCRIPT DEFINITIONS ---
 interface TransactionFunding {
@@ -85,6 +86,27 @@ export default function ExpensePage() {
   const [personMaxLimits, setPersonMaxLimits] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
+  
+  // --- LIST CONTROLS STATE (Search, Filter, Sort, Pagination) ---
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterType, setFilterType] = useState('ALL');
+  const [sortOrder, setSortOrder] = useState('date-desc');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(20);
+
+  const filterOptions = [
+    { label: 'All Types', value: 'ALL' },
+    { label: 'General Expenses', value: 'EXPENSE' },
+    { label: 'Loans Given', value: 'LEND' },
+    { label: 'Installments Paid', value: 'BORROW_REPAYMENT' },
+  ];
+
+  const sortOptions = [
+    { label: 'Newest First', value: 'date-desc' },
+    { label: 'Oldest First', value: 'date-asc' },
+    { label: 'Highest Amount', value: 'amount-desc' },
+    { label: 'Lowest Amount', value: 'amount-asc' },
+  ];
   
   // --- MODAL & FORM STATE ---
   const [showModal, setShowModal] = useState(false);
@@ -350,12 +372,48 @@ export default function ExpensePage() {
 
   const profileOptions = [{ label: 'No Profile (One-time)', value: 'NONE' }, ...expenseProfiles];
 
+  // --- DATA PROCESSING (Search, Filter, Sort, Pagination) ---
+  const processedTransactions = useMemo(() => {
+    let result = [...transactions];
+
+    if (filterType !== 'ALL') {
+      result = result.filter(tx => tx.type === filterType);
+    }
+
+    if (searchTerm) {
+      const lowerTerm = searchTerm.toLowerCase();
+      result = result.filter(tx => 
+        tx.source_or_method?.toLowerCase().includes(lowerTerm) ||
+        tx.description?.toLowerCase().includes(lowerTerm) ||
+        tx.transaction_method?.toLowerCase().includes(lowerTerm) ||
+        tx.expense_profiles?.name?.toLowerCase().includes(lowerTerm) ||
+        tx.people_profiles?.name?.toLowerCase().includes(lowerTerm)
+      );
+    }
+
+    result.sort((a, b) => {
+      if (sortOrder === 'date-desc') return new Date(b.date).getTime() - new Date(a.date).getTime();
+      if (sortOrder === 'date-asc') return new Date(a.date).getTime() - new Date(b.date).getTime();
+      if (sortOrder === 'amount-desc') return Number(b.amount) - Number(a.amount);
+      if (sortOrder === 'amount-asc') return Number(a.amount) - Number(b.amount);
+      return 0;
+    });
+
+    return result;
+  }, [transactions, searchTerm, filterType, sortOrder]);
+
+  const totalPages = Math.ceil(processedTransactions.length / itemsPerPage) || 1;
+  const paginatedTransactions = processedTransactions.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
   return (
     <div className="flex flex-col min-h-screen bg-slate-50 relative">
       <motion.header 
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        className="px-6 pt-8 pb-4 bg-white border-b border-slate-100 flex flex-col gap-4 sticky top-0 z-10"
+        className="px-6 pt-8 pb-4 bg-white border-b border-slate-100 flex flex-col gap-4 sticky top-0 z-30"
       >
         <div className="flex justify-between items-center">
           <h1 className="text-xl font-bold text-slate-900">Expenses</h1>
@@ -368,6 +426,19 @@ export default function ExpensePage() {
         </Link>
       </motion.header>
 
+      {/* REUSABLE LIST CONTROLS */}
+      <TopControls 
+        searchTerm={searchTerm} 
+        setSearchTerm={(val) => { setSearchTerm(val); setCurrentPage(1); }} 
+        filterType={filterType} 
+        setFilterType={(val) => { setFilterType(val); setCurrentPage(1); }} 
+        filterOptions={filterOptions} 
+        sortOrder={sortOrder} 
+        setSortOrder={(val) => { setSortOrder(val); setCurrentPage(1); }} 
+        sortOptions={sortOptions} 
+        searchPlaceholder="Search expense records..."
+      />
+
       <motion.div 
         variants={containerVariants}
         initial="hidden"
@@ -375,78 +446,92 @@ export default function ExpensePage() {
         className="p-6 pb-24 space-y-3"
       >
         {isLoading ? <p className="text-center text-slate-400 py-8">Loading...</p> : 
-         transactions.length === 0 ? <p className="text-center text-slate-400 py-8 bg-white rounded-2xl border border-dashed border-slate-200">No expense records yet.</p> :
-         transactions.map((tx) => {
-          
-          let Icon = ArrowUpRight;
-          let displayName = tx.expense_profiles?.name || tx.source_or_method;
-          let subText = tx.description ? `${tx.description} • ${tx.transaction_method}` : tx.transaction_method;
+         paginatedTransactions.length === 0 ? <p className="text-center text-slate-400 py-8 bg-white rounded-2xl border border-dashed border-slate-200">No expense records found.</p> :
+         paginatedTransactions.map((tx) => {
+         
+         let Icon = ArrowUpRight;
+         let displayName = tx.expense_profiles?.name || tx.source_or_method;
+         let subText = tx.description ? `${tx.description} • ${tx.transaction_method}` : tx.transaction_method;
 
-          if (tx.type === 'LEND') {
-            Icon = ArrowUpRight;
-            displayName = `Loan Given to ${tx.people_profiles?.name || tx.source_or_method}`;
-          } else if (tx.type === 'BORROW_REPAYMENT') {
-            Icon = Wallet;
-            displayName = `Installment Paid to ${tx.people_profiles?.name || tx.source_or_method}`;
-          }
-          
-          const isFunded = tx.transaction_fundings && tx.transaction_fundings.length > 0;
-          let funderNames = '';
+         if (tx.type === 'LEND') {
+           Icon = ArrowUpRight;
+           displayName = `Loan Given to ${tx.people_profiles?.name || tx.source_or_method}`;
+         } else if (tx.type === 'BORROW_REPAYMENT') {
+           Icon = Wallet;
+           displayName = `Installment Paid to ${tx.people_profiles?.name || tx.source_or_method}`;
+         }
+         
+         const isFunded = tx.transaction_fundings && tx.transaction_fundings.length > 0;
+         let funderNames = '';
 
-          if (isFunded) {
-            const names = tx.transaction_fundings!.map(f => {
-              const p = peopleOptions.find(opt => opt.value === f.person_id);
-              return p ? p.label : 'Unknown';
-            });
-            funderNames = `Funded by: ${names.join(', ')}`;
-          }
-          
-          const CardContent = (
-            <div className="flex items-center justify-between p-4 bg-white rounded-xl border border-slate-100 shadow-sm active:bg-slate-50 transition-colors gap-4 group">
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <div className="h-10 w-10 bg-red-50 rounded-full flex items-center justify-center border border-red-100 shrink-0 relative">
-                  <Icon className="h-5 w-5 text-red-600" />
-                  {isFunded && <div className="absolute -top-1 -right-1 h-3 w-3 bg-blue-500 border-2 border-white rounded-full"></div>}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start gap-1">
-                    <p className="font-semibold text-slate-900 leading-tight break-words">{displayName}</p>
-                    {(tx.expense_profile_id || tx.person_id) && <ChevronRight className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />}
-                  </div>
-                  <p className="text-xs text-slate-500 mt-1 break-words leading-snug">{formatDate(tx.date)} • {subText}</p>
-                  {isFunded && (
-                    <p className="text-[11px] font-medium text-blue-600 mt-0.5 leading-snug truncate">
-                      {funderNames}
-                    </p>
-                  )}
-                </div>
-              </div>
-              
-              <div className="flex flex-col items-end gap-2 shrink-0">
-                <p className="font-bold text-red-600 whitespace-nowrap">-৳{Number(tx.amount).toLocaleString()}</p>
-                
-                {tx.type === 'EXPENSE' && (
-                  <div className="flex items-center gap-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={(e) => handleEditClick(tx, e)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors">
-                      <Edit className="h-4 w-4" />
-                    </button>
-                    <button onClick={(e) => handleDeleteClick(tx.id, e)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors">
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          );
+         if (isFunded) {
+           const names = tx.transaction_fundings!.map(f => {
+             const p = peopleOptions.find(opt => opt.value === f.person_id);
+             return p ? p.label : 'Unknown';
+           });
+           funderNames = `Funded by: ${names.join(', ')}`;
+         }
+         
+         const CardContent = (
+           <div className="flex items-center justify-between p-4 bg-white rounded-xl border border-slate-100 shadow-sm active:bg-slate-50 transition-colors gap-4 group">
+             <div className="flex items-center gap-3 flex-1 min-w-0">
+               <div className="h-10 w-10 bg-red-50 rounded-full flex items-center justify-center border border-red-100 shrink-0 relative">
+                 <Icon className="h-5 w-5 text-red-600" />
+                 {isFunded && <div className="absolute -top-1 -right-1 h-3 w-3 bg-blue-500 border-2 border-white rounded-full"></div>}
+               </div>
+               <div className="flex-1 min-w-0">
+                 <div className="flex items-start gap-1">
+                   <p className="font-semibold text-slate-900 leading-tight break-words">{displayName}</p>
+                   {(tx.expense_profile_id || tx.person_id) && <ChevronRight className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />}
+                 </div>
+                 <p className="text-xs text-slate-500 mt-1 break-words leading-snug">{formatDate(tx.date)} • {subText}</p>
+                 {isFunded && (
+                   <p className="text-[11px] font-medium text-blue-600 mt-0.5 leading-snug truncate">
+                     {funderNames}
+                   </p>
+                 )}
+               </div>
+             </div>
+             
+             <div className="flex flex-col items-end gap-2 shrink-0">
+               <p className="font-bold text-red-600 whitespace-nowrap">-৳{Number(tx.amount).toLocaleString()}</p>
+               
+               {tx.type === 'EXPENSE' && (
+                 <div className="flex items-center gap-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                   <button onClick={(e) => handleEditClick(tx, e)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors">
+                     <Edit className="h-4 w-4" />
+                   </button>
+                   <button onClick={(e) => handleDeleteClick(tx.id, e)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors">
+                     <Trash2 className="h-4 w-4" />
+                   </button>
+                 </div>
+               )}
+             </div>
+           </div>
+         );
 
-          if (tx.type === 'EXPENSE' && tx.expense_profile_id) {
-            return <motion.div key={tx.id} variants={itemVariants}><Link href={`/dashboard/expense/profiles/${tx.expense_profile_id}`} className="block">{CardContent}</Link></motion.div>;
-          } else if (['LEND', 'BORROW_REPAYMENT'].includes(tx.type) && tx.person_id) {
-            return <motion.div key={tx.id} variants={itemVariants}><Link href={`/dashboard/ledger/${tx.person_id}`} className="block">{CardContent}</Link></motion.div>;
-          } else {
-            return <motion.div key={tx.id} variants={itemVariants}>{CardContent}</motion.div>;
-          }
-         })}
+         if (tx.type === 'EXPENSE' && tx.expense_profile_id) {
+           return <motion.div key={tx.id} variants={itemVariants}><Link href={`/dashboard/expense/profiles/${tx.expense_profile_id}`} className="block">{CardContent}</Link></motion.div>;
+         } else if (['LEND', 'BORROW_REPAYMENT'].includes(tx.type) && tx.person_id) {
+           return <motion.div key={tx.id} variants={itemVariants}><Link href={`/dashboard/ledger/${tx.person_id}`} className="block">{CardContent}</Link></motion.div>;
+         } else {
+           return <motion.div key={tx.id} variants={itemVariants}>{CardContent}</motion.div>;
+         }
+        })}
+
+        {/* REUSABLE PAGINATION CONTROLS */}
+        {!isLoading && (
+          <motion.div variants={itemVariants}>
+            <PaginationControls 
+               currentPage={currentPage} 
+               totalPages={totalPages} 
+               itemsPerPage={itemsPerPage} 
+               setItemsPerPage={setItemsPerPage} 
+               setCurrentPage={setCurrentPage} 
+               totalItems={processedTransactions.length}
+            />
+          </motion.div>
+        )}
       </motion.div>
 
       {/* --- ANIMATED MODAL --- */}
@@ -493,7 +578,7 @@ export default function ExpensePage() {
                       {isOverFunded && <p className="text-xs text-red-500 mt-1.5 font-medium">Funded amount exceeds expense total!</p>}
                     </div>
                     
-                    <div>
+                    <div className="relative z-50">
                       <CustomDropdown label="Asset Category / Profile" options={profileOptions} value={profileId} onChange={setProfileId} onAdd={handleAddProfile} addLabel="Create category" />
                     </div>
 
@@ -503,7 +588,7 @@ export default function ExpensePage() {
                           initial={{ opacity: 0, height: 0, marginTop: 0 }} 
                           animate={{ opacity: 1, height: 'auto', marginTop: 16 }} 
                           exit={{ opacity: 0, height: 0, marginTop: 0 }} 
-                          className="overflow-hidden"
+                          className="overflow-hidden relative z-40"
                         >
                           <label className="block text-sm font-medium text-slate-700 mb-1.5">Asset Name (One-time)</label>
                           <input 
@@ -516,11 +601,11 @@ export default function ExpensePage() {
                       )}
                     </AnimatePresence>
                     
-                    <div>
+                    <div className="relative z-30">
                       <CustomDropdown label="Payment Method" options={methods} value={method} onChange={setMethod} onAdd={handleAddMethod} addLabel="Add new method" />
                     </div>
                     
-                    <div>
+                    <div className="relative z-20">
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Date</label>
                       <input 
                         type="date" required max={todayDate}
@@ -529,7 +614,7 @@ export default function ExpensePage() {
                       />
                     </div>
                     
-                    <div>
+                    <div className="relative z-10">
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Description (Optional)</label>
                       <input 
                         type="text" 
