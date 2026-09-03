@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
-import { Plus, ArrowDownRight, HandCoins, ChevronRight, Edit, Trash2 } from 'lucide-react';
+import { Plus, ArrowDownRight, HandCoins, ChevronRight, Edit, Trash2, X } from 'lucide-react';
 import CustomDropdown from '@/components/CustomDropdown';
 
 // --- TYPESCRIPT DEFINITIONS ---
@@ -121,7 +121,6 @@ export default function IncomePage() {
     try {
       const res = await fetch(`/api/transactions/${id}`, { method: 'DELETE' });
       if (res.ok) {
-        alert("Income record deleted successfully!");
         fetchIncome();
       } else {
         alert("Failed to delete the record.");
@@ -161,7 +160,6 @@ export default function IncomePage() {
       }
 
       if (res.ok) {
-        alert(editingTxId ? "Income updated successfully!" : "Income added successfully!");
         setShowModal(false);
         resetForm();
         fetchIncome();
@@ -231,20 +229,22 @@ export default function IncomePage() {
                <div className="flex flex-col items-end gap-2 shrink-0">
                  <p className="font-bold text-green-600 whitespace-nowrap">+৳{Number(tx.amount).toLocaleString()}</p>
                  
-                 <div className="flex items-center gap-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
-                   <button 
-                     onClick={(e) => handleEditClick(tx, e)} 
-                     className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
-                   >
-                     <Edit className="h-4 w-4" />
-                   </button>
-                   <button 
-                     onClick={(e) => handleDeleteClick(tx.id, e)} 
-                     className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
-                   >
-                     <Trash2 className="h-4 w-4" />
-                   </button>
-                 </div>
+                 {tx.type === 'INCOME' && (
+                   <div className="flex items-center gap-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                     <button 
+                       onClick={(e) => handleEditClick(tx, e)} 
+                       className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                     >
+                       <Edit className="h-4 w-4" />
+                     </button>
+                     <button 
+                       onClick={(e) => handleDeleteClick(tx.id, e)} 
+                       className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                     >
+                       <Trash2 className="h-4 w-4" />
+                     </button>
+                   </div>
+                 )}
                </div>
              </div>
            );
@@ -285,10 +285,15 @@ export default function IncomePage() {
                 transition={{ type: 'spring', damping: 25, stiffness: 300 }}
                 className="relative bg-white rounded-t-3xl p-6 pb-8 shadow-2xl max-w-md mx-auto w-full flex flex-col max-h-[90vh]"
               >
-                <h3 className="text-xl font-bold mb-4 shrink-0 flex items-center gap-2">
-                  {editingTxId ? <Edit className="h-5 w-5 text-blue-600" /> : <Plus className="h-5 w-5 text-blue-600" />}
-                  {editingTxId ? 'Edit Income' : 'Add Income'}
-                </h3>
+                <div className="flex justify-between items-center mb-4 shrink-0">
+                  <h3 className="text-xl font-bold flex items-center gap-2 text-slate-900">
+                    {editingTxId ? <Edit className="h-5 w-5 text-blue-600" /> : <Plus className="h-5 w-5 text-blue-600" />}
+                    {editingTxId ? 'Edit Income' : 'Add Income'}
+                  </h3>
+                  <button onClick={() => { setShowModal(false); resetForm(); }} className="p-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors">
+                    <X className="h-5 w-5" />
+                  </button>
+                </div>
                 
                 <form onSubmit={handleSave} className="flex flex-col flex-1 overflow-hidden">
                   <div className="space-y-4 overflow-y-auto px-1 pb-32 flex-1 overscroll-contain">
@@ -302,15 +307,15 @@ export default function IncomePage() {
                       />
                     </div>
                     
-                    <div className="relative z-[60]">
+                    <div>
                       <CustomDropdown label="Source" options={sources} value={source} onChange={setSource} onAdd={handleAddSource} addLabel="Add source" />
                     </div>
                     
-                    <div className="relative z-[50]">
+                    <div>
                       <CustomDropdown label="Method" options={methods} value={method} onChange={setMethod} onAdd={handleAddMethod} addLabel="Add method" />
                     </div>
                     
-                    <div className="relative z-[40]">
+                    <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Date</label>
                       <input 
                         type="date" required 
@@ -319,7 +324,7 @@ export default function IncomePage() {
                       />
                     </div>
                     
-                    <div className="relative z-[30]">
+                    <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Description (Optional)</label>
                       <input 
                         type="text" 

@@ -70,7 +70,7 @@ export async function GET(
           const desc = tx.description ? `${assetName} - ${tx.description}` : assetName;
 
           return {
-            id: `${tx.id}-funding`, // Unique ID to prevent React mapping errors
+            id: tx.id, // PERFECT FIX: Pass the raw, unmodified ID so the frontend can find it
             type: 'ASSET_PURCHASE',  // Custom UI flag we set up in the frontend
             amount: f.amount,
             date: tx.date,

@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { 
   ArrowLeft, ArrowUpRight, ArrowDownRight, CheckCircle2, 
-  Wallet, HandCoins, FileSpreadsheet, Printer, ChevronDown, Edit, Trash2, ShoppingBag 
+  Wallet, HandCoins, FileSpreadsheet, Printer, ChevronDown, Edit, Trash2, ShoppingBag, X 
 } from 'lucide-react';
 import CustomDropdown from '@/components/CustomDropdown';
 
@@ -31,6 +31,11 @@ interface DisplayTransaction extends Transaction {
   shortBalanceText: string;
   fullBalanceText: string;
   runningBalanceAmt: number;
+}
+
+interface ProfileOption {
+  label: string;
+  value: string;
 }
 
 // --- UTILITIES ---
@@ -74,6 +79,7 @@ export default function PersonLedgerPage() {
   
   const [person, setPerson] = useState<{ id: string, name: string } | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [expenseProfiles, setExpenseProfiles] = useState<ProfileOption[]>([]);
   const [netBalance, setNetBalance] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
@@ -91,6 +97,12 @@ export default function PersonLedgerPage() {
   const todayDate = getLocalToday();
   const [date, setDate] = useState(todayDate); 
   const [description, setDescription] = useState('');
+  
+  // Asset Purchase Specific State
+  const [profileId, setProfileId] = useState('');
+  const [oneTimeName, setOneTimeName] = useState('');
+  const [fullExpenseAmount, setFullExpenseAmount] = useState(0);
+
   const [isSaving, setIsSaving] = useState(false);
   
   const [methods, setMethods] = useState([
@@ -99,12 +111,25 @@ export default function PersonLedgerPage() {
   ]);
 
   const fetchLedger = async () => {
-    const res = await fetch(`/api/people/${params.id as string}`);
-    if (res.ok) {
-      const data = await res.json();
-      setPerson(data.person);
-      setTransactions(data.transactions || []);
-      setNetBalance(data.netBalance || 0);
+    setIsLoading(true);
+    try {
+      const [ledgerRes, profilesRes] = await Promise.all([
+        fetch(`/api/people/${params.id as string}`),
+        fetch('/api/expense-profiles')
+      ]);
+
+      if (ledgerRes.ok) {
+        const data = await ledgerRes.json();
+        setPerson(data.person);
+        setTransactions(data.transactions || []);
+        setNetBalance(data.netBalance || 0);
+      }
+      if (profilesRes.ok) {
+        const pData = await profilesRes.json();
+        setExpenseProfiles((pData.profiles || []).map((p: any) => ({ label: p.name, value: p.id })));
+      }
+    } catch (err) {
+      console.error(err);
     }
     setIsLoading(false);
   };
@@ -120,34 +145,144 @@ export default function PersonLedgerPage() {
     setMethod(newMethod);
   };
 
-  const handleActionClick = (type: TxType) => {
+  const handleAddProfile = async (name: string) => {
+    try {
+      const res = await fetch('/api/expense-profiles', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }) 
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setExpenseProfiles(p => [...p, { label: data.profile.name, value: data.profile.id }]);
+        setProfileId(data.profile.id);
+      } else {
+        alert("Failed to create new ledger profile.");
+      }
+    } catch (error) {
+      alert("An error occurred while creating the ledger.");
+    }
+  };
+
+  const resetForm = () => {
     setEditingTxId(null);
-    setTxType(type);
-    setRepayMode('REPAYMENT'); 
     setAmount('');
     setOriginalAmount(0);
     setMethod('');
     setDescription('');
     setDate(todayDate);
-    setShowModal(true);
+    setProfileId('');
+    setOneTimeName('');
+    setFullExpenseAmount(0);
   };
 
-  const handleEditClick = (tx: Transaction) => {
-    setEditingTxId(tx.id);
-    setTxType(tx.type);
+  const handleActionClick = (type: TxType) => {
+    resetForm();
+    setTxType(type);
     setRepayMode('REPAYMENT'); 
-    setAmount(tx.amount.toString());
-    setOriginalAmount(Number(tx.amount));
-    setMethod(tx.transaction_method);
-    setDate(tx.date); 
-    setDescription((tx.description || '').replace('(Edited)', '').trim());
     setShowModal(true);
   };
 
-  const handleDeleteClick = async (txId: string) => {
+  // Helper to fetch the full transaction for Smart Editing/Deleting (Fixed String casting mismatch)
+  const fetchFullTx = async (txId: string) => {
+    try {
+      const res = await fetch(`/api/transactions`); 
+      const data = await res.json();
+      return (data.transactions || []).find((t: any) => String(t.id) === String(txId));
+    } catch (err) {
+      console.error("Failed to fetch full transaction", err);
+      return null;
+    }
+  };
+
+  const handleEditClick = async (tx: Transaction, e: React.MouseEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    
+    if (tx.type === 'ASSET_PURCHASE') {
+      setIsLoading(true);
+      const fullTx = await fetchFullTx(tx.id);
+      setIsLoading(false);
+      
+      if (!fullTx) return alert("Original transaction not found.");
+      
+      resetForm();
+      setEditingTxId(tx.id);
+      setTxType('BORROW_REPAYMENT');
+      setRepayMode('ASSET');
+      setAmount(tx.amount.toString()); 
+      setOriginalAmount(Number(tx.amount));
+      setFullExpenseAmount(Number(fullTx.amount));
+      setMethod(fullTx.transaction_method);
+      setDate(fullTx.date);
+      setDescription((fullTx.description || '').replace('(Edited)', '').trim());
+      setProfileId(fullTx.expense_profile_id || 'NONE');
+      setOneTimeName(!fullTx.expense_profile_id ? fullTx.source_or_method : '');
+      setShowModal(true);
+    } else {
+      resetForm();
+      setEditingTxId(tx.id);
+      setTxType(tx.type);
+      setRepayMode('REPAYMENT'); 
+      setAmount(tx.amount.toString());
+      setOriginalAmount(Number(tx.amount));
+      setMethod(tx.transaction_method);
+      setDate(tx.date); 
+      setDescription((tx.description || '').replace('(Edited)', '').trim());
+      setShowModal(true);
+    }
+  };
+
+  const handleDeleteClick = async (tx: Transaction, e: React.MouseEvent) => {
+    e.preventDefault(); e.stopPropagation();
+
+    if (tx.type === 'ASSET_PURCHASE') {
+      setIsLoading(true);
+      const fullTx = await fetchFullTx(tx.id);
+      setIsLoading(false);
+      
+      if (!fullTx) return alert("Original transaction not found.");
+      
+      const otherFundings = (fullTx.transaction_fundings || []).filter((f: any) => String(f.person_id) !== String(params.id));
+      
+      let confirmMsg = 'Are you sure you want to remove your funding from this asset?';
+      if (otherFundings.length > 0) {
+        confirmMsg = `This asset was also funded by others. Deleting this will ONLY remove ${person?.name}'s contribution. The rest of the asset will remain intact. Continue?`;
+      } else {
+        confirmMsg = `This will delete the entire asset purchase since ${person?.name} is the only funder. Continue?`;
+      }
+      
+      if (!window.confirm(confirmMsg)) return;
+
+      if (otherFundings.length === 0) {
+        await fetch(`/api/transactions/${tx.id}`, { method: 'DELETE' });
+      } else {
+        // Smart Delete: Keep the expense, just remove this person's funding and adjust total
+        const newTotalExpenseAmount = Number(fullTx.amount) - Number(tx.amount);
+        const payload = {
+          type: 'EXPENSE',
+          amount: newTotalExpenseAmount > 0 ? newTotalExpenseAmount : Number(fullTx.amount),
+          method: fullTx.transaction_method,
+          date: fullTx.date,
+          description: fullTx.description,
+          source: fullTx.source_or_method,
+          profileId: fullTx.expense_profile_id,
+          fundingSources: otherFundings.map((f: any) => ({ personId: f.person_id, amount: f.amount }))
+        };
+        await fetch(`/api/transactions/${tx.id}`, { 
+          method: 'PUT', 
+          headers: { 'Content-Type': 'application/json' }, 
+          body: JSON.stringify(payload) 
+        });
+      }
+      setExpandedTxId(null);
+      fetchLedger();
+      return;
+    }
+    
+    // Normal Delete
     if (!window.confirm('Are you sure you want to delete this transaction? All balances will be automatically adjusted.')) return;
     
-    const res = await fetch(`/api/transactions/${txId}`, { method: 'DELETE' });
+    const res = await fetch(`/api/transactions/${tx.id}`, { method: 'DELETE' });
     if (res.ok) {
       setExpandedTxId(null);
       fetchLedger(); 
@@ -196,22 +331,49 @@ export default function PersonLedgerPage() {
       source: person?.name || 'Ledger', 
     };
 
-    // BULLETPROOF FIX: We inject both `personId` AND `person_id` to ensure the API 
-    // strictly catches it regardless of spelling mismatch in the backend!
-    if (txType === 'BORROW_REPAYMENT' && repayMode === 'ASSET' && !editingTxId) {
-      payload = {
-        type: 'EXPENSE',
-        amount: numericAmount,
-        method,
-        date,
-        description: description || 'Asset Purchase',
-        source: 'Funded by Loan',
-        fundingSources: [{ 
-          personId: params.id as string, 
-          person_id: params.id as string, 
-          amount: numericAmount 
-        }]
-      };
+    // SMART SAVE FOR ASSET PURCHASES
+    if (txType === 'BORROW_REPAYMENT' && repayMode === 'ASSET') {
+      const sourceName = profileId === 'NONE' ? (oneTimeName.trim() || 'General Expense') : expenseProfiles.find(p => p.value === profileId)?.label;
+      
+      if (!editingTxId) {
+        // Create new Asset Purchase
+        payload = {
+          type: 'EXPENSE',
+          amount: numericAmount,
+          method,
+          date,
+          description: description || 'Asset Purchase',
+          source: sourceName,
+          profileId: profileId !== 'NONE' ? profileId : null,
+          fundingSources: [{ 
+            personId: params.id as string, 
+            person_id: params.id as string, 
+            amount: numericAmount 
+          }]
+        };
+      } else {
+        // Smart Edit: Fetch full transaction, adjust ONLY this person's share, preserve the rest
+        setIsLoading(true);
+        const fullTx = await fetchFullTx(editingTxId);
+        setIsLoading(false);
+
+        const otherFundings = (fullTx?.transaction_fundings || []).filter((f: any) => String(f.person_id) !== String(params.id));
+        const newTotalExpenseAmount = fullExpenseAmount - originalAmount + numericAmount;
+
+        payload = {
+          type: 'EXPENSE',
+          amount: newTotalExpenseAmount > 0 ? newTotalExpenseAmount : numericAmount,
+          method,
+          date,
+          description: description || 'Asset Purchase',
+          source: sourceName,
+          profileId: profileId !== 'NONE' ? profileId : null,
+          fundingSources: [
+            ...otherFundings.map((f: any) => ({ personId: f.person_id, amount: f.amount })),
+            { personId: params.id as string, amount: numericAmount }
+          ]
+        };
+      }
     }
 
     let url = '/api/transactions';
@@ -230,6 +392,7 @@ export default function PersonLedgerPage() {
 
     if (res.ok) {
       setShowModal(false);
+      resetForm();
       fetchLedger(); 
     } else {
       alert("Failed to save transaction.");
@@ -318,6 +481,8 @@ export default function PersonLedgerPage() {
   const canBorrow = netBalance <= 0;
   const canReceiveInstallment = netBalance > 0;
   const canPayInstallment = netBalance < 0;
+
+  const profileOptions = [{ label: 'No Profile (One-time)', value: 'NONE' }, ...expenseProfiles];
 
   const getActionDetails = () => {
     switch(txType) {
@@ -500,21 +665,14 @@ export default function PersonLedgerPage() {
                             </div>
                           </div>
                           
-                          {!isAsset && (
-                            <div className="flex gap-2 mt-4 pt-4 border-t border-slate-200">
-                              <button onClick={() => handleEditClick(tx)} className="flex-1 py-2 flex items-center justify-center gap-1 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-100 transition-colors">
-                                <Edit className="h-3.5 w-3.5" /> Edit
-                              </button>
-                              <button onClick={() => handleDeleteClick(tx.id)} className="flex-1 py-2 flex items-center justify-center gap-1 bg-red-50 text-red-600 rounded-lg text-xs font-bold hover:bg-red-100 transition-colors">
-                                <Trash2 className="h-3.5 w-3.5" /> Delete
-                              </button>
-                            </div>
-                          )}
-                          {isAsset && (
-                            <div className="mt-4 pt-4 border-t border-slate-200 text-center">
-                              <p className="text-xs text-slate-500 italic">This asset purchase was managed via the Expenses page.</p>
-                            </div>
-                          )}
+                          <div className="flex gap-2 mt-4 pt-4 border-t border-slate-200">
+                            <button onClick={(e) => handleEditClick(tx, e)} className="flex-1 py-2 flex items-center justify-center gap-1 bg-white border border-slate-200 text-slate-600 rounded-lg text-xs font-bold hover:bg-slate-100 transition-colors">
+                              <Edit className="h-3.5 w-3.5" /> Edit
+                            </button>
+                            <button onClick={(e) => handleDeleteClick(tx, e)} className="flex-1 py-2 flex items-center justify-center gap-1 bg-red-50 text-red-600 rounded-lg text-xs font-bold hover:bg-red-100 transition-colors">
+                              <Trash2 className="h-3.5 w-3.5" /> Delete
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </motion.div>
@@ -535,7 +693,7 @@ export default function PersonLedgerPage() {
                   animate={{ opacity: 1 }}
                   exit={{ opacity: 0 }}
                   className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" 
-                  onClick={() => setShowModal(false)} 
+                  onClick={() => { setShowModal(false); resetForm(); }} 
                 />
                 <motion.div 
                   initial={{ y: '100%' }}
@@ -545,12 +703,17 @@ export default function PersonLedgerPage() {
                   className="relative bg-white rounded-t-3xl p-6 pb-8 shadow-2xl max-w-md mx-auto w-full flex flex-col max-h-[92vh]"
                 >
                   
-                  <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold mb-4 w-fit ${actionInfo.bg} ${actionInfo.color}`}>
-                    {txType === 'BORROW_REPAYMENT' && repayMode === 'ASSET' ? <ShoppingBag className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />} 
-                    {editingTxId ? 'Edit Record:' : ''} {actionInfo.title}
+                  <div className="flex justify-between items-start mb-4 shrink-0">
+                    <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold w-fit ${actionInfo.bg} ${actionInfo.color}`}>
+                      {txType === 'BORROW_REPAYMENT' && repayMode === 'ASSET' ? <ShoppingBag className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />} 
+                      {editingTxId ? 'Edit Record:' : ''} {actionInfo.title}
+                    </div>
+                    <button onClick={() => { setShowModal(false); resetForm(); }} className="p-2 -mr-2 -mt-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors">
+                      <X className="h-5 w-5" />
+                    </button>
                   </div>
 
-                  {/* NEW: DUAL ACTION TOGGLE FOR BORROW REPAYMENT */}
+                  {/* DUAL ACTION TOGGLE FOR BORROW REPAYMENT */}
                   {txType === 'BORROW_REPAYMENT' && !editingTxId && (
                     <div className="flex gap-2 mb-6 bg-slate-100 p-1 rounded-xl shrink-0">
                       <button 
@@ -574,7 +737,7 @@ export default function PersonLedgerPage() {
                     <div className="space-y-4 overflow-y-auto px-1 pb-48 flex-1 overscroll-contain [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                       <div>
                         <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                          {repayMode === 'ASSET' ? 'Asset Price / Spent Amount (৳)' : 'Amount (৳)'}
+                          {repayMode === 'ASSET' ? (editingTxId ? 'Your Adjusted Contribution (৳)' : 'Asset Price / Spent Amount (৳)') : 'Amount (৳)'}
                         </label>
                         <input
                           type="number" required min="0.01" step="0.01" 
@@ -598,11 +761,42 @@ export default function PersonLedgerPage() {
                         )}
                       </div>
 
-                      <div className="relative z-[60]">
+                      {/* CONDITIONAL ASSET PURCHASE FIELDS */}
+                      {repayMode === 'ASSET' && (
+                        <AnimatePresence>
+                          <motion.div 
+                            initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+                            className="space-y-4"
+                          >
+                            <div className="relative z-[90] focus-within:z-[999] hover:z-[999]">
+                              <CustomDropdown label="Expense Ledger Profile" options={profileOptions} value={profileId} onChange={setProfileId} onAdd={handleAddProfile} addLabel="Create ledger" />
+                            </div>
+
+                            <AnimatePresence>
+                              {profileId === 'NONE' && (
+                                <motion.div 
+                                  initial={{ opacity: 0, height: 0, marginTop: 0 }} animate={{ opacity: 1, height: 'auto', marginTop: 16 }} exit={{ opacity: 0, height: 0, marginTop: 0 }} 
+                                  className="overflow-hidden"
+                                >
+                                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Expense Title (One-time)</label>
+                                  <input 
+                                    type="text" required 
+                                    value={oneTimeName} onChange={(e) => setOneTimeName(e.target.value)} 
+                                    className="w-full h-14 px-4 text-slate-900 bg-white placeholder:text-slate-400 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" 
+                                    placeholder="e.g. Gold Purchase" 
+                                  />
+                                </motion.div>
+                              )}
+                            </AnimatePresence>
+                          </motion.div>
+                        </AnimatePresence>
+                      )}
+
+                      <div className="relative z-[80] focus-within:z-[999] hover:z-[999]">
                         <CustomDropdown label="Payment Method" options={methods} value={method} onChange={setMethod} onAdd={handleAddMethod} addLabel="Add new method" />
                       </div>
 
-                      <div className="relative z-[50]">
+                      <div className="relative z-[70]">
                         <label className="block text-sm font-medium text-slate-700 mb-1.5">Date</label>
                         <input
                           type="date" required 
@@ -613,7 +807,7 @@ export default function PersonLedgerPage() {
                         />
                       </div>
 
-                      <div className="relative z-[40]">
+                      <div className="relative z-[60]">
                         <label className="block text-sm font-medium text-slate-700 mb-1.5">
                           {repayMode === 'ASSET' ? 'Asset Name / Description' : 'Remarks / Reason'}
                         </label>
@@ -630,7 +824,7 @@ export default function PersonLedgerPage() {
                     <div className="pt-4 mt-auto shrink-0 bg-white border-t border-slate-100">
                       <button 
                         type="submit" 
-                        disabled={isSaving || !amount || !method || isAmountExceeded} 
+                        disabled={isSaving || !amount || !method || isAmountExceeded || (repayMode === 'ASSET' && !profileId) || (repayMode === 'ASSET' && profileId === 'NONE' && !oneTimeName.trim())} 
                         className={`w-full h-14 text-white rounded-xl font-medium flex items-center justify-center disabled:opacity-50 transition-colors ${repayMode === 'ASSET' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-600 hover:bg-blue-700'}`}
                       >
                         {isSaving ? 'Processing...' : editingTxId ? 'Update Record' : 'Confirm Action'}

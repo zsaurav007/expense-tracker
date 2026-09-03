@@ -6,7 +6,7 @@ import { createPortal } from 'react-dom';
 import { motion, Variants } from 'framer-motion';
 import { 
   LogOut, Key, ShieldCheck, UserCircle, 
-  Database, Download, AlertTriangle, UploadCloud, ShieldAlert, CheckCircle2 
+  Database, Download, AlertTriangle, UploadCloud, ShieldAlert, CheckCircle2, X 
 } from 'lucide-react';
 
 // --- TYPESCRIPT INTERFACES ---
@@ -18,7 +18,6 @@ export interface UserData {
 }
 
 // --- ANIMATION VARIANTS ---
-// FIX: Added 'Variants' type and 'as const' to resolve Framer Motion TypeScript errors
 const containerVariants: Variants = {
   hidden: { opacity: 0 },
   show: { opacity: 1, transition: { staggerChildren: 0.1 } }
@@ -286,9 +285,14 @@ export default function SettingsClient({ user }: { user: UserData }) {
                   <form onSubmit={handleBackupAndWipe} className="space-y-4">
                     {wipeStep === 1 ? (
                       <>
-                        <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2 mb-2">
-                          <Download className="h-6 w-6 text-blue-600" /> Verify Identity
-                        </h3>
+                        <div className="flex justify-between items-start mb-2">
+                          <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                            <Download className="h-6 w-6 text-blue-600" /> Verify Identity
+                          </h3>
+                          <button type="button" onClick={closeModal} className="p-2 -mr-2 -mt-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors">
+                            <X className="h-5 w-5" />
+                          </button>
+                        </div>
                         <p className="text-sm text-slate-600 mb-4">
                           To protect your data, please enter your credentials. We will download a secure backup file before proceeding.
                         </p>
@@ -306,9 +310,14 @@ export default function SettingsClient({ user }: { user: UserData }) {
                       </>
                     ) : (
                       <>
-                        <h3 className="text-xl font-bold text-red-600 flex items-center gap-2 mb-2">
-                          <ShieldAlert className="h-6 w-6" /> Final Confirmation
-                        </h3>
+                        <div className="flex justify-between items-start mb-2">
+                          <h3 className="text-xl font-bold text-red-600 flex items-center gap-2">
+                            <ShieldAlert className="h-6 w-6" /> Final Confirmation
+                          </h3>
+                          <button type="button" onClick={closeModal} className="p-2 -mr-2 -mt-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors">
+                            <X className="h-5 w-5" />
+                          </button>
+                        </div>
                         <p className="text-sm text-slate-700 mb-4 font-medium bg-red-50 p-4 rounded-xl border border-red-100">
                           Your backup has been downloaded. Are you absolutely sure you want to permanently delete ALL your transactions, ledgers, and expenses? This cannot be undone.
                         </p>
@@ -331,9 +340,14 @@ export default function SettingsClient({ user }: { user: UserData }) {
                 {/* RESTORE MODAL */}
                 {activeModal === 'restore' && (
                   <form onSubmit={handleRestore} className="space-y-4">
-                    <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2 mb-2">
-                      <UploadCloud className="h-6 w-6 text-blue-600" /> Restore Data
-                    </h3>
+                    <div className="flex justify-between items-start mb-2">
+                      <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                        <UploadCloud className="h-6 w-6 text-blue-600" /> Restore Data
+                      </h3>
+                      <button type="button" onClick={closeModal} className="p-2 -mr-2 -mt-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors">
+                        <X className="h-5 w-5" />
+                      </button>
+                    </div>
                     <p className="text-sm text-slate-600 mb-4">
                       Uploading a backup will replace your current data. Please verify your identity.
                     </p>

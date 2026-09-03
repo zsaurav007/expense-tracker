@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
-import { UserPlus, UserCircle2, ChevronRight, Phone, Edit, Trash2, ShieldAlert, Plus } from 'lucide-react';
+import { UserPlus, UserCircle2, ChevronRight, Phone, Edit, Trash2, ShieldAlert, Plus, X } from 'lucide-react';
 
 type Person = {
   id: string;
@@ -14,7 +14,6 @@ type Person = {
 };
 
 // --- FRAMER MOTION VARIANTS ---
-// FIX: Added 'Variants' type and 'as const' to resolve Framer Motion TypeScript errors
 const containerVariants: Variants = {
   hidden: { opacity: 0 },
   show: { opacity: 1, transition: { staggerChildren: 0.05 } }
@@ -38,7 +37,7 @@ export default function LedgerHubPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
 
-  // Modal States - Now includes 'add'
+  // Modal States
   const [activeModal, setActiveModal] = useState<'add' | 'edit' | 'delete' | 'reset' | null>(null);
   const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
   const [modalPassword, setModalPassword] = useState('');
@@ -275,9 +274,14 @@ export default function LedgerHubPage() {
                 {/* ADD PERSON MODAL */}
                 {activeModal === 'add' && (
                   <form onSubmit={handleAddPerson} className="space-y-4">
-                    <h3 className="text-xl font-bold mb-4 text-slate-900 flex items-center gap-2">
-                      <UserPlus className="h-5 w-5 text-blue-600" /> Add New Person
-                    </h3>
+                    <div className="flex justify-between items-start mb-4">
+                      <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                        <UserPlus className="h-5 w-5 text-blue-600" /> Add New Person
+                      </h3>
+                      <button type="button" onClick={closeModal} className="p-2 -mr-2 -mt-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors">
+                        <X className="h-5 w-5" />
+                      </button>
+                    </div>
                     <input
                       type="text" required value={newPersonName} onChange={(e) => setNewPersonName(e.target.value)}
                       className="w-full h-14 px-4 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-slate-900 placeholder:text-slate-400"
@@ -300,9 +304,14 @@ export default function LedgerHubPage() {
                 {/* EDIT MODAL */}
                 {activeModal === 'edit' && (
                   <form onSubmit={handleEditSubmit} className="space-y-4">
-                    <h3 className="text-xl font-bold mb-4 text-slate-900 flex items-center gap-2">
-                      <Edit className="h-5 w-5 text-blue-600" /> Edit Profile
-                    </h3>
+                    <div className="flex justify-between items-start mb-4">
+                      <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                        <Edit className="h-5 w-5 text-blue-600" /> Edit Profile
+                      </h3>
+                      <button type="button" onClick={closeModal} className="p-2 -mr-2 -mt-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors">
+                        <X className="h-5 w-5" />
+                      </button>
+                    </div>
                     <input 
                       type="text" required value={editName} onChange={(e) => setEditName(e.target.value)} 
                       className="w-full h-14 px-4 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-slate-900 placeholder:text-slate-400" 
@@ -328,9 +337,14 @@ export default function LedgerHubPage() {
                 {/* DELETE MODAL */}
                 {activeModal === 'delete' && (
                   <form onSubmit={handleDeleteSubmit} className="space-y-4">
-                    <h3 className="text-xl font-bold mb-2 text-red-600 flex items-center gap-2">
-                      <Trash2 className="h-6 w-6" /> Delete Person
-                    </h3>
+                    <div className="flex justify-between items-start mb-2">
+                      <h3 className="text-xl font-bold text-red-600 flex items-center gap-2">
+                        <Trash2 className="h-6 w-6" /> Delete Person
+                      </h3>
+                      <button type="button" onClick={closeModal} className="p-2 -mr-2 -mt-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors">
+                        <X className="h-5 w-5" />
+                      </button>
+                    </div>
                     <p className="text-slate-600 text-sm mb-4">
                       Are you sure you want to delete <strong className="text-slate-900">{selectedPerson?.name}</strong>? This will permanently erase their profile and automatically adjust your calculations.
                     </p>
@@ -349,9 +363,14 @@ export default function LedgerHubPage() {
                 {/* FULL RESET MODAL */}
                 {activeModal === 'reset' && (
                   <form onSubmit={handleResetSubmit} className="space-y-4">
-                    <h3 className="text-xl font-bold mb-2 text-red-600 flex items-center gap-2">
-                      <ShieldAlert className="h-6 w-6" /> EXTREME DANGER
-                    </h3>
+                    <div className="flex justify-between items-start mb-2">
+                      <h3 className="text-xl font-bold text-red-600 flex items-center gap-2">
+                        <ShieldAlert className="h-6 w-6" /> EXTREME DANGER
+                      </h3>
+                      <button type="button" onClick={closeModal} className="p-2 -mr-2 -mt-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors">
+                        <X className="h-5 w-5" />
+                      </button>
+                    </div>
                     <p className="text-slate-600 text-sm mb-4">
                       This action will <strong className="text-red-600">PERMANENTLY DELETE ALL PEOPLE</strong> and completely wipe out all Loan/Installment calculations. This is used to fix ghost transaction issues. It cannot be undone.
                     </p>
