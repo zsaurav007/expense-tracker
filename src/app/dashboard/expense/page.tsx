@@ -119,7 +119,11 @@ export default function ExpensePage() {
       if (txRes.ok) {
         const data = await txRes.json();
         allTxs = data.transactions || [];
-        setTransactions(allTxs);
+        
+        // PERFECT FIX: We only visually display money going OUT (Expense, Give Loan, Pay Installment).
+        // We hide BORROW and LEND_REPAYMENT from the list since they are Income.
+        const visibleTxs = allTxs.filter(tx => ['EXPENSE', 'LEND', 'BORROW_REPAYMENT'].includes(tx.type));
+        setTransactions(visibleTxs);
       }
       
       if (profRes.ok) {
@@ -132,7 +136,7 @@ export default function ExpensePage() {
         const rawPeople = data.people || [];
         setPeopleOptions(rawPeople.map((p: any) => ({ label: p.name, value: p.id })));
 
-        // Calculate precise unspent loan limit per person
+        // Calculate precise unspent loan limit per person using ALL transactions
         const limits: Record<string, number> = {};
         rawPeople.forEach((p: any) => {
           let totalBorrowed = 0;
@@ -210,6 +214,7 @@ export default function ExpensePage() {
   const updateFundingSource = (id: string, field: 'personId' | 'amount', value: string) => {
     setFundingSources(prev => prev.map(f => {
       if (f.id === id) {
+        // If the person is changed, reset the amount to 0/empty to prevent accidental over-drafting
         if (field === 'personId' && f.personId !== value) {
           return { ...f, personId: value, amount: '' };
         }
@@ -228,7 +233,6 @@ export default function ExpensePage() {
     return parseFloat(f.amount || '0') > limit;
   });
 
-  // STRICT RULE: Cannot add new source if an existing row is completely empty
   const hasEmptySource = fundingSources.some(f => !f.personId || !f.amount);
 
   const resetForm = () => {
@@ -389,7 +393,6 @@ export default function ExpensePage() {
           const isFunded = tx.transaction_fundings && tx.transaction_fundings.length > 0;
           let funderNames = '';
 
-          // Find Funder Names
           if (isFunded) {
             const names = tx.transaction_fundings!.map(f => {
               const p = peopleOptions.find(opt => opt.value === f.person_id);
@@ -479,7 +482,6 @@ export default function ExpensePage() {
                 <form onSubmit={handleSave} className="flex flex-col flex-1 overflow-hidden">
                   <div className="space-y-4 overflow-y-auto px-1 pb-48 flex-1 overscroll-contain [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                     
-                    {/* AMOUNT */}
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Amount (৳)</label>
                       <input 
@@ -492,7 +494,7 @@ export default function ExpensePage() {
                     </div>
                     
                     <div>
-                      <CustomDropdown label="Expense Ledger Profile" options={profileOptions} value={profileId} onChange={setProfileId} onAdd={handleAddProfile} addLabel="Create ledger" />
+                      <CustomDropdown label="Asset Category / Profile" options={profileOptions} value={profileId} onChange={setProfileId} onAdd={handleAddProfile} addLabel="Create category" />
                     </div>
 
                     <AnimatePresence>
@@ -503,19 +505,19 @@ export default function ExpensePage() {
                           exit={{ opacity: 0, height: 0, marginTop: 0 }} 
                           className="overflow-hidden"
                         >
-                          <label className="block text-sm font-medium text-slate-700 mb-1.5">Expense Title (One-time)</label>
+                          <label className="block text-sm font-medium text-slate-700 mb-1.5">Asset Name (One-time)</label>
                           <input 
                             type="text" required 
                             value={oneTimeName} onChange={(e) => setOneTimeName(e.target.value)} 
                             className="w-full h-14 px-4 text-slate-900 bg-white placeholder:text-slate-400 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" 
-                            placeholder="e.g. Gold Purchase" 
+                            placeholder="e.g. Gaming PC" 
                           />
                         </motion.div>
                       )}
                     </AnimatePresence>
                     
                     <div>
-                      <CustomDropdown label="Method" options={methods} value={method} onChange={setMethod} onAdd={handleAddMethod} addLabel="Add method" />
+                      <CustomDropdown label="Payment Method" options={methods} value={method} onChange={setMethod} onAdd={handleAddMethod} addLabel="Add new method" />
                     </div>
                     
                     <div>
@@ -533,11 +535,10 @@ export default function ExpensePage() {
                         type="text" 
                         value={description} onChange={(e) => setDescription(e.target.value)} 
                         className="w-full h-14 px-4 text-slate-900 bg-white placeholder:text-slate-400 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" 
-                        placeholder="e.g. For Mother's Gift" 
+                        placeholder="e.g. Additional remarks" 
                       />
                     </div>
 
-                    {/* --- FUNDING SPLIT SECTION --- */}
                     <div className="pt-6 mt-4 border-t border-slate-100">
                       <div className="flex justify-between items-center mb-4">
                         <div>
