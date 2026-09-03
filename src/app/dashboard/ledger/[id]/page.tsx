@@ -183,7 +183,6 @@ export default function PersonLedgerPage() {
     setShowModal(true);
   };
 
-  // Helper to fetch the full transaction for Smart Editing/Deleting (Fixed String casting mismatch)
   const fetchFullTx = async (txId: string) => {
     try {
       const res = await fetch(`/api/transactions`); 
@@ -256,7 +255,6 @@ export default function PersonLedgerPage() {
       if (otherFundings.length === 0) {
         await fetch(`/api/transactions/${tx.id}`, { method: 'DELETE' });
       } else {
-        // Smart Delete: Keep the expense, just remove this person's funding and adjust total
         const newTotalExpenseAmount = Number(fullTx.amount) - Number(tx.amount);
         const payload = {
           type: 'EXPENSE',
@@ -279,7 +277,6 @@ export default function PersonLedgerPage() {
       return;
     }
     
-    // Normal Delete
     if (!window.confirm('Are you sure you want to delete this transaction? All balances will be automatically adjusted.')) return;
     
     const res = await fetch(`/api/transactions/${tx.id}`, { method: 'DELETE' });
@@ -331,18 +328,16 @@ export default function PersonLedgerPage() {
       source: person?.name || 'Ledger', 
     };
 
-    // SMART SAVE FOR ASSET PURCHASES
     if (txType === 'BORROW_REPAYMENT' && repayMode === 'ASSET') {
       const sourceName = profileId === 'NONE' ? (oneTimeName.trim() || 'General Expense') : expenseProfiles.find(p => p.value === profileId)?.label;
       
       if (!editingTxId) {
-        // Create new Asset Purchase
         payload = {
           type: 'EXPENSE',
           amount: numericAmount,
           method,
           date,
-          description: description || 'Asset Purchase',
+          description: description, // Fully optional now
           source: sourceName,
           profileId: profileId !== 'NONE' ? profileId : null,
           fundingSources: [{ 
@@ -352,7 +347,6 @@ export default function PersonLedgerPage() {
           }]
         };
       } else {
-        // Smart Edit: Fetch full transaction, adjust ONLY this person's share, preserve the rest
         setIsLoading(true);
         const fullTx = await fetchFullTx(editingTxId);
         setIsLoading(false);
@@ -365,7 +359,7 @@ export default function PersonLedgerPage() {
           amount: newTotalExpenseAmount > 0 ? newTotalExpenseAmount : numericAmount,
           method,
           date,
-          description: description || 'Asset Purchase',
+          description: description, // Fully optional
           source: sourceName,
           profileId: profileId !== 'NONE' ? profileId : null,
           fundingSources: [
@@ -554,6 +548,21 @@ export default function PersonLedgerPage() {
                 {netBalance > 0 ? `${person.name} owes you` : netBalance < 0 ? `You owe ${person.name}` : 'Accounts Settled'}
               </p>
               <h2 className="text-5xl font-extrabold tracking-tight">৳{Math.abs(netBalance).toLocaleString()}</h2>
+            </div>
+          </motion.div>
+
+          <motion.div variants={itemVariants} className="px-6 mb-4 grid grid-cols-3 gap-3">
+            <div className="bg-white border border-slate-200 p-3 rounded-2xl shadow-sm flex flex-col items-center justify-center text-center">
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Loan Total</span>
+              <span className="text-sm font-bold text-slate-800">৳{outstandingDebt.toLocaleString()}</span>
+            </div>
+            <div className="bg-blue-50 border border-blue-100 p-3 rounded-2xl shadow-sm flex flex-col items-center justify-center text-center">
+              <span className="text-[10px] font-bold text-blue-500 uppercase tracking-wider mb-1">Asset Total</span>
+              <span className="text-sm font-bold text-blue-700">৳{totalAssetPurchases.toLocaleString()}</span>
+            </div>
+            <div className="bg-orange-50 border border-orange-100 p-3 rounded-2xl shadow-sm flex flex-col items-center justify-center text-center">
+              <span className="text-[10px] font-bold text-orange-500 uppercase tracking-wider mb-1">Cash in Hand</span>
+              <span className="text-sm font-bold text-orange-700">৳{unspentLoanFromPerson.toLocaleString()}</span>
             </div>
           </motion.div>
 
@@ -769,7 +778,7 @@ export default function PersonLedgerPage() {
                             className="space-y-4"
                           >
                             <div className="relative z-[90] focus-within:z-[999] hover:z-[999]">
-                              <CustomDropdown label="Expense Ledger Profile" options={profileOptions} value={profileId} onChange={setProfileId} onAdd={handleAddProfile} addLabel="Create ledger" />
+                              <CustomDropdown label="Asset Category / Profile" options={profileOptions} value={profileId} onChange={setProfileId} onAdd={handleAddProfile} addLabel="Create category" />
                             </div>
 
                             <AnimatePresence>
@@ -778,12 +787,12 @@ export default function PersonLedgerPage() {
                                   initial={{ opacity: 0, height: 0, marginTop: 0 }} animate={{ opacity: 1, height: 'auto', marginTop: 16 }} exit={{ opacity: 0, height: 0, marginTop: 0 }} 
                                   className="overflow-hidden"
                                 >
-                                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Expense Title (One-time)</label>
+                                  <label className="block text-sm font-medium text-slate-700 mb-1.5">Asset Name (One-time)</label>
                                   <input 
                                     type="text" required 
                                     value={oneTimeName} onChange={(e) => setOneTimeName(e.target.value)} 
                                     className="w-full h-14 px-4 text-slate-900 bg-white placeholder:text-slate-400 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all" 
-                                    placeholder="e.g. Gold Purchase" 
+                                    placeholder="e.g. Gaming PC" 
                                   />
                                 </motion.div>
                               )}
@@ -809,14 +818,14 @@ export default function PersonLedgerPage() {
 
                       <div className="relative z-[60]">
                         <label className="block text-sm font-medium text-slate-700 mb-1.5">
-                          {repayMode === 'ASSET' ? 'Asset Name / Description' : 'Remarks / Reason'}
+                          Description (Optional)
                         </label>
                         <input
-                          type="text" required={repayMode === 'ASSET'}
+                          type="text"
                           value={description}
                           onChange={(e) => setDescription(e.target.value)}
                           className="w-full h-14 px-4 bg-white rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 placeholder:text-slate-400 transition-all"
-                          placeholder={repayMode === 'ASSET' ? "e.g. Gaming PC" : "e.g. For medical bills"}
+                          placeholder="e.g. Additional remarks"
                         />
                       </div>
                     </div>
