@@ -9,7 +9,7 @@ import {
   HandCoins, History, Users, Download, FileSpreadsheet, Printer, LogOut, FileText 
 } from 'lucide-react';
 import DashboardCharts from '@/components/DashboardCharts';
-import CustomDropdown from '@/components/CustomDropdown'; // <-- Using your Custom Dropdown again!
+import CustomDropdown from '@/components/CustomDropdown';
 
 // --- TYPESCRIPT INTERFACES ---
 export interface Transaction {
@@ -82,8 +82,6 @@ export default function DashboardClient({
   const [reportType, setReportType] = useState('ALL'); 
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
-  
-  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
 
   const timeOptions = [
     { label: 'This Week', value: 'week' },
@@ -142,7 +140,7 @@ export default function DashboardClient({
     
     // 1. Calculate Main Wallet Balance
     if (['INCOME', 'BORROW', 'LEND_REPAYMENT'].includes(tx.type)) totalBalance += amt;
-    if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT'].includes(tx.type)) totalBalance -= amt;
+    if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE'].includes(tx.type)) totalBalance -= amt;
 
     // 2. Calculate Active Debt for Unspent Loan Math
     if (tx.type === 'BORROW') currentDebt += amt;
@@ -195,7 +193,7 @@ export default function DashboardClient({
   chartTxs.forEach((tx) => {
     const amt = Number(tx.amount);
     if (['INCOME', 'BORROW', 'LEND_REPAYMENT'].includes(tx.type)) filteredIncome += amt;
-    if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT'].includes(tx.type)) filteredExpense += amt;
+    if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE'].includes(tx.type)) filteredExpense += amt;
   });
 
   const prepareChartData = () => {
@@ -220,7 +218,7 @@ export default function DashboardClient({
 
       if (!map[key]) map[key] = { month: label, income: 0, expense: 0 };
       if (['INCOME', 'BORROW', 'LEND_REPAYMENT'].includes(tx.type)) map[key].income += Number(tx.amount);
-      if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT'].includes(tx.type)) map[key].expense += Number(tx.amount);
+      if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE'].includes(tx.type)) map[key].expense += Number(tx.amount);
     });
     return Object.values(map);
   };
@@ -247,8 +245,11 @@ export default function DashboardClient({
       if (rStart && txDate < rStart) return false;
     }
     
-    if (reportType === 'INCOME' && t.type !== 'INCOME') return false;
-    if (reportType === 'EXPENSE' && t.type !== 'EXPENSE') return false;
+    const isIncomeType = ['INCOME', 'BORROW', 'LEND_REPAYMENT'].includes(t.type);
+    const isExpenseType = ['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE'].includes(t.type);
+
+    if (reportType === 'INCOME' && !isIncomeType) return false;
+    if (reportType === 'EXPENSE' && !isExpenseType) return false;
 
     return true;
   }).reverse();
@@ -257,7 +258,7 @@ export default function DashboardClient({
   reportTxs.forEach(t => {
     const amt = Number(t.amount);
     if (t.type === 'INCOME') repIncome += amt;
-    if (t.type === 'EXPENSE') repExpense += amt;
+    if (['EXPENSE', 'ASSET_PURCHASE'].includes(t.type)) repExpense += amt;
     if (['LEND', 'BORROW_REPAYMENT'].includes(t.type)) repLend += amt;
     if (['BORROW', 'LEND_REPAYMENT'].includes(t.type)) repBorrow += amt;
   });
@@ -267,6 +268,7 @@ export default function DashboardClient({
     if (type === 'BORROW') return 'Loan Taken';
     if (type === 'LEND_REPAYMENT') return 'Installment Received';
     if (type === 'BORROW_REPAYMENT') return 'Installment Paid';
+    if (type === 'ASSET_PURCHASE') return 'Asset Purchase';
     return type.charAt(0).toUpperCase() + type.slice(1).toLowerCase();
   };
 
@@ -284,7 +286,7 @@ export default function DashboardClient({
     reportTxs.forEach((tx, i) => {
       const name = tx.expense_profiles?.name || tx.people_profiles?.name || tx.source_or_method || 'Unknown';
       const remarks = `"${(tx.description || '').replace(/"/g, '""')}"`;
-      const isOut = ['EXPENSE', 'LEND', 'BORROW_REPAYMENT'].includes(tx.type);
+      const isOut = ['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE'].includes(tx.type);
       const incAmt = !isOut ? tx.amount : '';
       const expAmt = isOut ? tx.amount : '';
       
@@ -302,37 +304,9 @@ export default function DashboardClient({
     document.body.removeChild(link);
   };
 
-  // --- INSTANT PDF DOWNLOAD ---
+  // --- NATIVE PDF PRINT ---
   const downloadInstantPDF = () => {
-    setIsGeneratingPDF(true);
-    const element = document.getElementById('pdf-report-container');
-    if (!element) {
-      setIsGeneratingPDF(false);
-      return;
-    }
-
-    if ((window as any).html2pdf) {
-      (window as any).html2pdf().from(element).set({
-        margin: 10,
-        filename: `${getReportTitle().replace(/ /g, '_')}.pdf`,
-        image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true },
-        jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
-      }).save().then(() => setIsGeneratingPDF(false));
-    } else {
-      const script = document.createElement('script');
-      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
-      script.onload = () => {
-        (window as any).html2pdf().from(element).set({
-          margin: 10,
-          filename: `${getReportTitle().replace(/ /g, '_')}.pdf`,
-          image: { type: 'jpeg', quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true },
-          jsPDF: { unit: 'mm', format: 'a4', orientation: 'landscape' }
-        }).save().then(() => setIsGeneratingPDF(false));
-      };
-      document.body.appendChild(script);
-    }
+    window.print();
   };
 
   return (
@@ -515,7 +489,7 @@ export default function DashboardClient({
                 let route = '/dashboard';
                 let displayName = tx.source_or_method || 'Unknown';
 
-                if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT'].includes(tx.type)) { 
+                if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE'].includes(tx.type)) { 
                   colorClass = 'text-red-600'; 
                   bgClass = 'bg-red-50 border-red-100'; 
                   isPositive = false; 
@@ -547,6 +521,11 @@ export default function DashboardClient({
                   Icon = Wallet; 
                   displayName = `Paid back ${tx.people_profiles?.name || 'Unknown'}`; 
                   route = `/dashboard/ledger/${tx.person_id}`; 
+                }
+                else if (tx.type === 'ASSET_PURCHASE') {
+                  Icon = ArrowUpRight;
+                  displayName = `Asset: ${tx.source_or_method || 'Unknown'}`;
+                  route = '/dashboard/expense';
                 }
 
                 return (
@@ -610,8 +589,8 @@ export default function DashboardClient({
               <button onClick={downloadCSV} className="h-12 bg-green-50 text-green-700 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-green-100 transition-colors shadow-sm">
                 <FileSpreadsheet className="h-5 w-5" /> Export Excel
               </button>
-              <button onClick={downloadInstantPDF} disabled={isGeneratingPDF} className="h-12 bg-red-50 text-red-700 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-red-100 transition-colors shadow-sm disabled:opacity-50">
-                <FileText className="h-5 w-5" /> {isGeneratingPDF ? 'Generating...' : 'Download PDF'}
+              <button onClick={downloadInstantPDF} className="h-12 bg-red-50 text-red-700 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-red-100 transition-colors shadow-sm">
+                <Printer className="h-5 w-5" /> Print PDF Report
               </button>
             </div>
           </div>
@@ -619,9 +598,9 @@ export default function DashboardClient({
 
       </motion.div>
 
-      {/* --- HIDDEN PDF REPORT TEMPLATE (For HTML2PDF Engine) --- */}
-      <div className="absolute top-0 left-[-9999px] opacity-0 pointer-events-none w-[1200px] z-[-1]">
-        <div id="pdf-report-container" className="bg-white text-black p-8 font-sans w-[1200px]">
+      {/* --- HIDDEN PDF REPORT TEMPLATE (For Native Print Engine) --- */}
+      <div className="absolute top-0 left-[-9999px] opacity-0 pointer-events-none w-[1200px] z-[-1] print:static print:opacity-100 print:w-full print:z-auto">
+        <div id="pdf-report-container" className="bg-white text-black p-8 font-sans w-[1200px] print:w-full print:p-0">
           <div className="text-center mb-8 border-b border-slate-200 pb-4">
             <h1 className="text-3xl font-bold text-slate-900 mb-2">{getReportTitle()}</h1>
             <p className="text-sm text-slate-500 mt-1">Generated on: {formatDate(new Date())}</p>
@@ -646,7 +625,7 @@ export default function DashboardClient({
             <tbody>
               {reportTxs.map((tx, index) => {
                 const name = tx.expense_profiles?.name || tx.people_profiles?.name || tx.source_or_method || 'Unknown';
-                const isOut = ['EXPENSE', 'LEND', 'BORROW_REPAYMENT'].includes(tx.type);
+                const isOut = ['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE'].includes(tx.type);
                 return (
                   <tr key={tx.id} className="hover:bg-slate-50 break-inside-avoid">
                     <td className="border border-slate-300 px-4 py-3 text-center">{index + 1}</td>

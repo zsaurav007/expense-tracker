@@ -1,16 +1,38 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
-import { UserPlus, UserCircle2, ChevronRight, Phone, Edit, Trash2, ShieldAlert, Plus, X } from 'lucide-react';
+import { UserPlus, UserCircle2, ChevronRight, Phone, Edit, Trash2, ShieldAlert, Plus, X, SlidersHorizontal } from 'lucide-react';
+import { TopControls, PaginationControls } from '@/components/ListControls';
 
+// --- TYPESCRIPT DEFINITIONS ---
 type Person = {
   id: string;
   name: string;
   phone?: string;
   netBalance: number;
+  created_at?: string; // Added to safely support date filtering
+};
+
+// --- UTILITIES ---
+const getLocalISODate = (dateObj: Date) => {
+  const offset = dateObj.getTimezoneOffset() * 60000;
+  return new Date(dateObj.getTime() - offset).toISOString().split('T')[0];
+};
+
+const getStartDate = (filter: string) => {
+  const now = new Date();
+  if (filter === 'week') {
+    now.setDate(now.getDate() - now.getDay()); 
+    return getLocalISODate(now);
+  }
+  if (filter === 'month') {
+    now.setDate(1);
+    return getLocalISODate(now);
+  }
+  return null;
 };
 
 // --- FRAMER MOTION VARIANTS ---
@@ -37,7 +59,41 @@ export default function LedgerHubPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
 
-  // Modal States
+  // --- LIST CONTROLS STATE (Search, Filter, Sort, Date, Pagination) ---
+  const [showFilters, setShowFilters] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterType, setFilterType] = useState('ALL');
+  const [sortOrder, setSortOrder] = useState('name-asc');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(20);
+
+  // Date Filter State
+  const [dateFilter, setDateFilter] = useState('all');
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
+
+  const filterOptions = [
+    { label: 'All Accounts', value: 'ALL' },
+    { label: 'Owe To Me', value: 'OWES_ME' },
+    { label: 'I Owe', value: 'I_OWE' },
+    { label: 'Settled Up', value: 'SETTLED' },
+  ];
+
+  const sortOptions = [
+    { label: 'Name (A-Z)', value: 'name-asc' },
+    { label: 'Name (Z-A)', value: 'name-desc' },
+    { label: 'Highest Balance', value: 'balance-desc' },
+    { label: 'Lowest Balance', value: 'balance-asc' },
+  ];
+
+  const dateFilterOptions = [
+    { label: 'All Time', value: 'all' },
+    { label: 'This Week', value: 'week' },
+    { label: 'This Month', value: 'month' },
+    { label: 'Custom Range', value: 'custom' },
+  ];
+
+  // --- MODAL STATES ---
   const [activeModal, setActiveModal] = useState<'add' | 'edit' | 'delete' | 'reset' | null>(null);
   const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
   const [modalPassword, setModalPassword] = useState('');
@@ -150,19 +206,72 @@ export default function LedgerHubPage() {
     setNewPersonPhone('');
   };
 
+  // Keep totals calculated against the original, full list
   const totalOwesMe = people.filter(p => p.netBalance > 0).reduce((sum, p) => sum + p.netBalance, 0);
   const totalIOwe = people.filter(p => p.netBalance < 0).reduce((sum, p) => sum + Math.abs(p.netBalance), 0);
+
+  // --- DATA PROCESSING (Search, Filter, Sort, Pagination) ---
+  const processedPeople = useMemo(() => {
+    let result = [...people];
+
+    // 1. Date Filter (based on account creation date if available)
+    if (dateFilter === 'custom') {
+      if (customStartDate) result = result.filter(p => p.created_at && p.created_at.split('T')[0] >= customStartDate);
+      if (customEndDate) result = result.filter(p => p.created_at && p.created_at.split('T')[0] <= customEndDate);
+    } else if (dateFilter !== 'all') {
+      const startDate = getStartDate(dateFilter);
+      if (startDate) result = result.filter(p => p.created_at && p.created_at.split('T')[0] >= startDate);
+    }
+
+    // 2. Filter by Type
+    if (filterType === 'OWES_ME') result = result.filter(p => p.netBalance > 0);
+    if (filterType === 'I_OWE') result = result.filter(p => p.netBalance < 0);
+    if (filterType === 'SETTLED') result = result.filter(p => p.netBalance === 0);
+
+    // 3. Search Filter
+    if (searchTerm) {
+      const lowerTerm = searchTerm.toLowerCase();
+      result = result.filter(p => 
+        p.name.toLowerCase().includes(lowerTerm) || 
+        (p.phone && p.phone.toLowerCase().includes(lowerTerm))
+      );
+    }
+
+    // 4. Sort
+    result.sort((a, b) => {
+      if (sortOrder === 'name-asc') return a.name.localeCompare(b.name);
+      if (sortOrder === 'name-desc') return b.name.localeCompare(a.name);
+      if (sortOrder === 'balance-desc') return b.netBalance - a.netBalance;
+      if (sortOrder === 'balance-asc') return a.netBalance - b.netBalance;
+      return 0;
+    });
+
+    return result;
+  }, [people, searchTerm, filterType, sortOrder, dateFilter, customStartDate, customEndDate]);
+
+  const totalPages = Math.ceil(processedPeople.length / itemsPerPage) || 1;
+  const paginatedPeople = processedPeople.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
 
   return (
     <div className="flex flex-col h-full bg-slate-50 min-h-screen relative">
       <motion.header 
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        className="px-6 pt-8 pb-4 bg-white border-b border-slate-100 sticky top-0 z-10 flex justify-between items-center"
+        className="px-6 pt-8 pb-4 bg-white border-b border-slate-100 sticky top-0 z-40 flex justify-between items-center"
       >
         <h1 className="text-xl font-bold text-slate-900">Lend & Borrow</h1>
         <div className="flex gap-2">
-          {/* Add & Reset Buttons Top Right */}
+          {/* FILTER TOGGLE BUTTON */}
+          <button 
+            onClick={() => setShowFilters(!showFilters)}
+            className={`p-2 rounded-full transition-colors ${showFilters ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+          >
+            <SlidersHorizontal className="h-4 w-4" />
+          </button>
+
           <button onClick={() => setActiveModal('reset')} className="flex items-center gap-1 text-red-600 bg-red-50 px-3 py-1.5 rounded-full text-sm font-semibold hover:bg-red-100 transition-colors">
             <ShieldAlert className="h-4 w-4" /> Reset
           </button>
@@ -172,18 +281,84 @@ export default function LedgerHubPage() {
         </div>
       </motion.header>
 
+      {/* REUSABLE LIST CONTROLS WITH PERFECT SMOOTH TOGGLE & OVERFLOW FIX */}
+      <AnimatePresence>
+        {showFilters && (
+          <motion.div
+            initial={{ opacity: 0, y: -10, display: 'none' }}
+            animate={{ opacity: 1, y: 0, display: 'block' }}
+            exit={{ opacity: 0, y: -10, transitionEnd: { display: 'none' } }}
+            transition={{ duration: 0.2 }}
+            className="bg-slate-50 relative z-30"
+          >
+            <div className="pb-4">
+              <TopControls 
+                searchTerm={searchTerm} 
+                setSearchTerm={(val) => { setSearchTerm(val); setCurrentPage(1); }} 
+                filterType={filterType} 
+                setFilterType={(val) => { setFilterType(val); setCurrentPage(1); }} 
+                filterOptions={filterOptions} 
+                sortOrder={sortOrder} 
+                setSortOrder={(val) => { setSortOrder(val); setCurrentPage(1); }} 
+                sortOptions={sortOptions} 
+                searchPlaceholder="Search accounts by name or phone..."
+                dateFilter={dateFilter}
+                setDateFilter={(val) => { setDateFilter(val); setCurrentPage(1); }}
+                dateOptions={dateFilterOptions}
+              />
+
+              {/* Custom Date Inputs - Kept completely visible */}
+              {dateFilter === 'custom' && (
+                <motion.div 
+                  initial={{ opacity: 0, y: -10 }} 
+                  animate={{ opacity: 1, y: 0 }} 
+                  className="px-6 mt-3 relative z-20"
+                >
+                  <div className="grid grid-cols-2 gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">From</label>
+                      <input 
+                        type="date" 
+                        value={customStartDate} 
+                        onChange={e => { setCustomStartDate(e.target.value); setCurrentPage(1); }} 
+                        className="w-full h-10 px-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 text-sm focus:outline-none bg-slate-50" 
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">To</label>
+                      <input 
+                        type="date" 
+                        value={customEndDate} 
+                        onChange={e => { setCustomEndDate(e.target.value); setCurrentPage(1); }} 
+                        className="w-full h-10 px-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 text-sm focus:outline-none bg-slate-50" 
+                      />
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <motion.div 
         variants={containerVariants}
         initial="hidden"
         animate="show"
-        className="flex-1"
+        className="flex-1 relative z-0"
       >
         <motion.div variants={itemVariants} className="p-6 grid grid-cols-2 gap-4">
-          <div className="bg-green-50 border border-green-100 p-4 rounded-2xl flex flex-col justify-center shadow-sm">
+          <div 
+            onClick={() => { setFilterType('OWES_ME'); setCurrentPage(1); }}
+            className={`bg-green-50 border p-4 rounded-2xl flex flex-col justify-center shadow-sm cursor-pointer hover:shadow-md transition-all active:scale-95 ${filterType === 'OWES_ME' ? 'border-green-400 ring-2 ring-green-200' : 'border-green-100 hover:border-green-300'}`}
+          >
             <span className="text-xs text-green-700 font-medium mb-1">Total Owed to You</span>
             <span className="text-lg font-bold text-green-700">৳{totalOwesMe.toLocaleString()}</span>
           </div>
-          <div className="bg-red-50 border border-red-100 p-4 rounded-2xl flex flex-col justify-center shadow-sm">
+          <div 
+            onClick={() => { setFilterType('I_OWE'); setCurrentPage(1); }}
+            className={`bg-red-50 border p-4 rounded-2xl flex flex-col justify-center shadow-sm cursor-pointer hover:shadow-md transition-all active:scale-95 ${filterType === 'I_OWE' ? 'border-red-400 ring-2 ring-red-200' : 'border-red-100 hover:border-red-300'}`}
+          >
             <span className="text-xs text-red-700 font-medium mb-1">Total You Owe</span>
             <span className="text-lg font-bold text-red-700">৳{totalIOwe.toLocaleString()}</span>
           </div>
@@ -192,28 +367,36 @@ export default function LedgerHubPage() {
         <div className="px-6 pb-24 space-y-8">
           {/* People List */}
           <div className="space-y-3">
-            <motion.h3 variants={itemVariants} className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-2">Active Accounts</motion.h3>
+            <div className="flex justify-between items-center mb-2">
+              <motion.h3 variants={itemVariants} className="text-sm font-bold text-slate-400 uppercase tracking-wider">Active Accounts</motion.h3>
+              {filterType !== 'ALL' && (
+                <button onClick={() => { setFilterType('ALL'); setCurrentPage(1); }} className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-md hover:bg-blue-100 transition-colors">
+                  Clear Filter
+                </button>
+              )}
+            </div>
+            
             {isLoading ? (
               <p className="text-center text-slate-400 text-sm py-8">Loading profiles...</p>
-            ) : people.length === 0 ? (
+            ) : paginatedPeople.length === 0 ? (
               <motion.div variants={itemVariants} className="text-center py-12 bg-white rounded-2xl border border-dashed border-slate-200">
                 <UserCircle2 className="h-10 w-10 text-slate-300 mx-auto mb-2" />
-                <p className="text-slate-500 text-sm">No profiles created yet.</p>
+                <p className="text-slate-500 text-sm">No profiles found.</p>
               </motion.div>
             ) : (
-              people.map((person) => (
+              paginatedPeople.map((person) => (
                 <motion.div 
                   variants={itemVariants}
                   key={person.id} 
                   onClick={() => router.push(`/dashboard/ledger/${person.id}`)}
-                  className="flex items-center justify-between p-4 bg-white border border-slate-200 rounded-2xl active:bg-slate-50 transition-colors shadow-sm cursor-pointer hover:shadow-md"
+                  className="flex items-center justify-between p-4 bg-white border border-slate-200 rounded-2xl active:bg-slate-50 transition-colors shadow-sm cursor-pointer hover:shadow-md group"
                 >
                   <div className="flex items-center gap-4">
                     <div className="h-12 w-12 bg-slate-100 rounded-full flex items-center justify-center text-lg font-bold text-slate-600 shrink-0">
                       {person.name.charAt(0).toUpperCase()}
                     </div>
                     <div>
-                      <h3 className="font-semibold text-slate-900 leading-tight">{person.name}</h3>
+                      <h3 className="font-semibold text-slate-900 leading-tight group-hover:text-blue-600 transition-colors">{person.name}</h3>
                       {person.phone && (
                         <p className="text-xs text-slate-400 flex items-center gap-1 mt-0.5">
                           <Phone className="h-3 w-3" /> {person.phone}
@@ -228,7 +411,7 @@ export default function LedgerHubPage() {
                   </div>
 
                   {/* Edit & Delete Action Icons */}
-                  <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                  <div className="flex items-center gap-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
                     <button 
                       onClick={() => { setSelectedPerson(person); setEditName(person.name); setEditPhone(person.phone || ''); setActiveModal('edit'); }} 
                       className="p-2 text-slate-400 hover:text-blue-600 bg-slate-50 hover:bg-blue-50 rounded-full transition-colors"
@@ -241,10 +424,24 @@ export default function LedgerHubPage() {
                     >
                       <Trash2 className="h-4 w-4" />
                     </button>
-                    <ChevronRight className="h-5 w-5 text-slate-300 ml-1" />
+                    <ChevronRight className="h-5 w-5 text-slate-300 ml-1 md:hidden" />
                   </div>
                 </motion.div>
               ))
+            )}
+
+            {/* REUSABLE PAGINATION CONTROLS */}
+            {!isLoading && (
+              <motion.div variants={itemVariants}>
+                <PaginationControls 
+                   currentPage={currentPage} 
+                   totalPages={totalPages} 
+                   itemsPerPage={itemsPerPage} 
+                   setItemsPerPage={setItemsPerPage} 
+                   setCurrentPage={setCurrentPage} 
+                   totalItems={processedPeople.length}
+                />
+              </motion.div>
             )}
           </div>
         </div>

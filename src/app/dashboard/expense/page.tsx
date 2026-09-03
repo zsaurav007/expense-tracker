@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
-import { Plus, ArrowUpRight, FolderOpen, ChevronRight, Wallet, Edit, Trash2, X } from 'lucide-react';
+import { Plus, ArrowUpRight, FolderOpen, ChevronRight, Wallet, Edit, Trash2, X, SlidersHorizontal } from 'lucide-react';
 import CustomDropdown from '@/components/CustomDropdown';
 import { TopControls, PaginationControls } from '@/components/ListControls';
 
@@ -64,6 +64,24 @@ const getLocalToday = () => {
   return d.toISOString().split('T')[0];
 };
 
+const getLocalISODate = (dateObj: Date) => {
+  const offset = dateObj.getTimezoneOffset() * 60000;
+  return new Date(dateObj.getTime() - offset).toISOString().split('T')[0];
+};
+
+const getStartDate = (filter: string) => {
+  const now = new Date();
+  if (filter === 'week') {
+    now.setDate(now.getDate() - now.getDay()); 
+    return getLocalISODate(now);
+  }
+  if (filter === 'month') {
+    now.setDate(1);
+    return getLocalISODate(now);
+  }
+  return null;
+};
+
 // --- FRAMER MOTION VARIANTS ---
 const containerVariants: Variants = {
   hidden: { opacity: 0 },
@@ -88,11 +106,17 @@ export default function ExpensePage() {
   const [mounted, setMounted] = useState(false);
   
   // --- LIST CONTROLS STATE (Search, Filter, Sort, Pagination) ---
+  const [showFilters, setShowFilters] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState('ALL');
   const [sortOrder, setSortOrder] = useState('date-desc');
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(20);
+
+  // Date Filter State
+  const [dateFilter, setDateFilter] = useState('all');
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
 
   const filterOptions = [
     { label: 'All Types', value: 'ALL' },
@@ -106,6 +130,13 @@ export default function ExpensePage() {
     { label: 'Oldest First', value: 'date-asc' },
     { label: 'Highest Amount', value: 'amount-desc' },
     { label: 'Lowest Amount', value: 'amount-asc' },
+  ];
+
+  const dateFilterOptions = [
+    { label: 'All Time', value: 'all' },
+    { label: 'This Week', value: 'week' },
+    { label: 'This Month', value: 'month' },
+    { label: 'Custom Range', value: 'custom' },
   ];
   
   // --- MODAL & FORM STATE ---
@@ -143,7 +174,6 @@ export default function ExpensePage() {
         allTxs = data.transactions || [];
         
         // PERFECT FIX: We only visually display money going OUT (Expense, Give Loan, Pay Installment).
-        // We hide BORROW and LEND_REPAYMENT from the list since they are Income.
         const visibleTxs = allTxs.filter(tx => ['EXPENSE', 'LEND', 'BORROW_REPAYMENT'].includes(tx.type));
         setTransactions(visibleTxs);
       }
@@ -372,14 +402,25 @@ export default function ExpensePage() {
 
   const profileOptions = [{ label: 'No Profile (One-time)', value: 'NONE' }, ...expenseProfiles];
 
-  // --- DATA PROCESSING (Search, Filter, Sort, Pagination) ---
+  // --- DATA PROCESSING (Search, Filter, Sort, Date, Pagination) ---
   const processedTransactions = useMemo(() => {
     let result = [...transactions];
 
+    // 1. Date Filter
+    if (dateFilter === 'custom') {
+      if (customStartDate) result = result.filter(tx => tx.date.split('T')[0] >= customStartDate);
+      if (customEndDate) result = result.filter(tx => tx.date.split('T')[0] <= customEndDate);
+    } else if (dateFilter !== 'all') {
+      const startDate = getStartDate(dateFilter);
+      if (startDate) result = result.filter(tx => tx.date.split('T')[0] >= startDate);
+    }
+
+    // 2. Type Filter
     if (filterType !== 'ALL') {
       result = result.filter(tx => tx.type === filterType);
     }
 
+    // 3. Search Filter
     if (searchTerm) {
       const lowerTerm = searchTerm.toLowerCase();
       result = result.filter(tx => 
@@ -391,6 +432,7 @@ export default function ExpensePage() {
       );
     }
 
+    // 4. Sort
     result.sort((a, b) => {
       if (sortOrder === 'date-desc') return new Date(b.date).getTime() - new Date(a.date).getTime();
       if (sortOrder === 'date-asc') return new Date(a.date).getTime() - new Date(b.date).getTime();
@@ -400,7 +442,9 @@ export default function ExpensePage() {
     });
 
     return result;
-  }, [transactions, searchTerm, filterType, sortOrder]);
+  }, [transactions, searchTerm, filterType, sortOrder, dateFilter, customStartDate, customEndDate]);
+
+  const totalFilteredAmount = processedTransactions.reduce((sum, tx) => sum + Number(tx.amount), 0);
 
   const totalPages = Math.ceil(processedTransactions.length / itemsPerPage) || 1;
   const paginatedTransactions = processedTransactions.slice(
@@ -413,37 +457,101 @@ export default function ExpensePage() {
       <motion.header 
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        className="px-6 pt-8 pb-4 bg-white border-b border-slate-100 flex flex-col gap-4 sticky top-0 z-30"
+        className="px-6 pt-8 pb-4 bg-white border-b border-slate-100 flex flex-col gap-4 sticky top-0 z-40"
       >
         <div className="flex justify-between items-center">
           <h1 className="text-xl font-bold text-slate-900">Expenses</h1>
-          <button onClick={() => { resetForm(); setShowModal(true); }} className="flex items-center gap-1 text-red-600 bg-red-50 px-3 py-1.5 rounded-full text-sm font-semibold hover:bg-red-100 transition-colors">
-            <Plus className="h-4 w-4" /> Add
-          </button>
+          <div className="flex items-center gap-2">
+            {/* FILTER TOGGLE BUTTON */}
+            <button 
+              onClick={() => setShowFilters(!showFilters)}
+              className={`p-2 rounded-full transition-colors ${showFilters ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+            </button>
+            <button onClick={() => { resetForm(); setShowModal(true); }} className="flex items-center gap-1 text-red-600 bg-red-50 px-3 py-1.5 rounded-full text-sm font-semibold hover:bg-red-100 transition-colors">
+              <Plus className="h-4 w-4" /> Add
+            </button>
+          </div>
         </div>
         <Link href="/dashboard/expense/profiles" className="w-full h-12 bg-slate-100 text-slate-700 rounded-xl flex items-center justify-center gap-2 font-medium hover:bg-slate-200 transition-colors">
           <FolderOpen className="h-4 w-4" /> Manage Expense Ledgers
         </Link>
       </motion.header>
 
-      {/* REUSABLE LIST CONTROLS */}
-      <TopControls 
-        searchTerm={searchTerm} 
-        setSearchTerm={(val) => { setSearchTerm(val); setCurrentPage(1); }} 
-        filterType={filterType} 
-        setFilterType={(val) => { setFilterType(val); setCurrentPage(1); }} 
-        filterOptions={filterOptions} 
-        sortOrder={sortOrder} 
-        setSortOrder={(val) => { setSortOrder(val); setCurrentPage(1); }} 
-        sortOptions={sortOptions} 
-        searchPlaceholder="Search expense records..."
-      />
+      {/* DYNAMIC TOTAL SUMMARY BOX */}
+      <motion.div variants={itemVariants} initial="hidden" animate="show" className="px-6 pt-6 relative z-10">
+        <div className="bg-red-50 border border-red-100 p-4 rounded-2xl flex flex-col justify-center shadow-sm">
+          <span className="text-xs text-red-700 font-medium mb-1">Total Expense (Filtered)</span>
+          <span className="text-2xl font-bold text-red-700">৳{totalFilteredAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+        </div>
+      </motion.div>
+
+      {/* REUSABLE LIST CONTROLS WITH SMOOTH TOGGLE & NO CLIPPING */}
+      <AnimatePresence>
+        {showFilters && (
+          <motion.div
+            initial={{ opacity: 0, y: -10, display: 'none' }}
+            animate={{ opacity: 1, y: 0, display: 'block' }}
+            exit={{ opacity: 0, y: -10, transitionEnd: { display: 'none' } }}
+            transition={{ duration: 0.2 }}
+            className="bg-slate-50 relative z-30"
+          >
+            <div className="pb-4">
+              <TopControls 
+                searchTerm={searchTerm} 
+                setSearchTerm={(val) => { setSearchTerm(val); setCurrentPage(1); }} 
+                filterType={filterType} 
+                setFilterType={(val) => { setFilterType(val); setCurrentPage(1); }} 
+                filterOptions={filterOptions} 
+                sortOrder={sortOrder} 
+                setSortOrder={(val) => { setSortOrder(val); setCurrentPage(1); }} 
+                sortOptions={sortOptions} 
+                searchPlaceholder="Search expense records..."
+                dateFilter={dateFilter}
+                setDateFilter={(val) => { setDateFilter(val); setCurrentPage(1); }}
+                dateOptions={dateFilterOptions}
+              />
+              
+              {/* Custom Date Inputs */}
+              {dateFilter === 'custom' && (
+                <motion.div 
+                  initial={{ opacity: 0, y: -10 }} 
+                  animate={{ opacity: 1, y: 0 }} 
+                  className="px-6 mt-3 relative z-20"
+                >
+                  <div className="grid grid-cols-2 gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">From</label>
+                      <input 
+                        type="date" 
+                        value={customStartDate} 
+                        onChange={e => { setCustomStartDate(e.target.value); setCurrentPage(1); }} 
+                        className="w-full h-10 px-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 text-sm focus:outline-none bg-slate-50" 
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">To</label>
+                      <input 
+                        type="date" 
+                        value={customEndDate} 
+                        onChange={e => { setCustomEndDate(e.target.value); setCurrentPage(1); }} 
+                        className="w-full h-10 px-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 text-sm focus:outline-none bg-slate-50" 
+                      />
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <motion.div 
         variants={containerVariants}
         initial="hidden"
         animate="show"
-        className="p-6 pb-24 space-y-3"
+        className="p-6 pb-24 space-y-3 relative z-0"
       >
         {isLoading ? <p className="text-center text-slate-400 py-8">Loading...</p> : 
          paginatedTransactions.length === 0 ? <p className="text-center text-slate-400 py-8 bg-white rounded-2xl border border-dashed border-slate-200">No expense records found.</p> :

@@ -13,14 +13,23 @@ interface TopControlsProps {
   setSortOrder: (val: string) => void;
   sortOptions: { label: string; value: string }[];
   searchPlaceholder?: string;
+  
+  // Optional Date Filter Props
+  dateFilter?: string;
+  setDateFilter?: (val: string) => void;
+  dateOptions?: { label: string; value: string }[];
 }
 
 export function TopControls({
-  searchTerm, setSearchTerm, filterType, setFilterType, filterOptions, sortOrder, setSortOrder, sortOptions, searchPlaceholder = "Search..."
+  searchTerm, setSearchTerm, filterType, setFilterType, filterOptions, sortOrder, setSortOrder, sortOptions, searchPlaceholder = "Search...", dateFilter, setDateFilter, dateOptions
 }: TopControlsProps) {
+  
+  const hasDateFilter = dateFilter !== undefined && setDateFilter && dateOptions;
+
   return (
-    <div className="px-6 pt-6 space-y-3 z-10 relative">
-      <div className="relative">
+    <div className="px-6 pt-6 space-y-3 relative z-[100]">
+      {/* ROW 1: Search Bar */}
+      <div className="relative z-10">
         <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
         <input 
           type="text" 
@@ -30,13 +39,20 @@ export function TopControls({
           className="w-full h-11 pl-10 pr-4 bg-white border border-slate-200 rounded-xl text-xs sm:text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-sm transition-all" 
         />
       </div>
-      <div className="flex gap-3">
-        <div className="flex-1 relative z-20">
+      
+      {/* ROW 2: Dropdowns (2 or 3 columns depending on page) */}
+      <div className={`grid ${hasDateFilter ? 'grid-cols-3' : 'grid-cols-2'} gap-2 sm:gap-3`}>
+        <div className="relative z-[60]">
           <CustomDropdown options={filterOptions} value={filterType} onChange={setFilterType} showSearch={false} />
         </div>
-        <div className="flex-1 relative z-10">
+        <div className="relative z-[50]">
           <CustomDropdown options={sortOptions} value={sortOrder} onChange={setSortOrder} showSearch={false} />
         </div>
+        {hasDateFilter && (
+          <div className="relative z-[40]">
+            <CustomDropdown options={dateOptions!} value={dateFilter} onChange={setDateFilter} showSearch={false} />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -80,7 +96,7 @@ export function PaginationControls({
         <button 
           onClick={() => setCurrentPage(p => Math.max(1, p - 1))} 
           disabled={currentPage === 1} 
-          className="h-11 w-11 flex items-center justify-center border border-slate-200 rounded-xl bg-white shadow-sm disabled:opacity-40 hover:bg-slate-50 transition-colors shrink-0"
+          className="h-11 w-11 flex items-center justify-center border border-slate-200 rounded-lg bg-white shadow-sm disabled:opacity-40 hover:bg-slate-50 transition-colors shrink-0"
         >
           <ChevronLeft className="h-4 w-4 text-slate-600" />
         </button>
@@ -90,7 +106,7 @@ export function PaginationControls({
         <button 
           onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} 
           disabled={currentPage === totalPages} 
-          className="h-11 w-11 flex items-center justify-center border border-slate-200 rounded-xl bg-white shadow-sm disabled:opacity-40 hover:bg-slate-50 transition-colors shrink-0"
+          className="h-11 w-11 flex items-center justify-center border border-slate-200 rounded-lg bg-white shadow-sm disabled:opacity-40 hover:bg-slate-50 transition-colors shrink-0"
         >
           <ChevronRight className="h-4 w-4 text-slate-600" />
         </button>

@@ -1,14 +1,15 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { 
   ArrowLeft, ArrowUpRight, ArrowDownRight, CheckCircle2, 
-  Wallet, HandCoins, FileSpreadsheet, Printer, ChevronDown, Edit, Trash2, ShoppingBag, X 
+  Wallet, HandCoins, FileSpreadsheet, Printer, ChevronDown, Edit, Trash2, ShoppingBag, X, SlidersHorizontal 
 } from 'lucide-react';
 import CustomDropdown from '@/components/CustomDropdown';
+import { TopControls, PaginationControls } from '@/components/ListControls';
 
 // --- TYPESCRIPT INTERFACES ---
 type TxType = 'LEND' | 'BORROW' | 'LEND_REPAYMENT' | 'BORROW_REPAYMENT' | 'ASSET_PURCHASE' | 'EXPENSE';
@@ -62,6 +63,24 @@ const getLocalToday = () => {
   return d.toISOString().split('T')[0];
 };
 
+const getLocalISODate = (dateObj: Date) => {
+  const offset = dateObj.getTimezoneOffset() * 60000;
+  return new Date(dateObj.getTime() - offset).toISOString().split('T')[0];
+};
+
+const getStartDate = (filter: string) => {
+  const now = new Date();
+  if (filter === 'week') {
+    now.setDate(now.getDate() - now.getDay()); 
+    return getLocalISODate(now);
+  }
+  if (filter === 'month') {
+    now.setDate(1);
+    return getLocalISODate(now);
+  }
+  return null;
+};
+
 // --- FRAMER MOTION VARIANTS ---
 const containerVariants: Variants = {
   hidden: { opacity: 0 },
@@ -84,6 +103,42 @@ export default function PersonLedgerPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
   const [expandedTxId, setExpandedTxId] = useState<string | null>(null);
+
+  // --- LIST CONTROLS STATE (Search, Filter, Sort, Pagination) ---
+  const [showFilters, setShowFilters] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterType, setFilterType] = useState('ALL');
+  const [sortOrder, setSortOrder] = useState('date-desc');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(20);
+
+  // Date Filter State
+  const [dateFilter, setDateFilter] = useState('all');
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
+
+  const filterOptions = [
+    { label: 'All Transactions', value: 'ALL' },
+    { label: 'Loan Given', value: 'LEND' },
+    { label: 'Loan Taken', value: 'BORROW' },
+    { label: 'Received Installment', value: 'LEND_REPAYMENT' },
+    { label: 'Paid Installment', value: 'BORROW_REPAYMENT' },
+    { label: 'Asset Purchases', value: 'ASSET_PURCHASE' },
+  ];
+
+  const sortOptions = [
+    { label: 'Newest First', value: 'date-desc' },
+    { label: 'Oldest First', value: 'date-asc' },
+    { label: 'Highest Amount', value: 'amount-desc' },
+    { label: 'Lowest Amount', value: 'amount-asc' },
+  ];
+
+  const dateFilterOptions = [
+    { label: 'All Time', value: 'all' },
+    { label: 'This Week', value: 'week' },
+    { label: 'This Month', value: 'month' },
+    { label: 'Custom Range', value: 'custom' },
+  ];
 
   // Modal & Edit State
   const [showModal, setShowModal] = useState(false);
@@ -292,8 +347,9 @@ export default function PersonLedgerPage() {
     if (tx.type === 'ASSET_PURCHASE') totalAssetPurchases += Number(tx.amount);
   });
 
-  const outstandingDebt = netBalance < 0 ? Math.abs(netBalance) : 0;
-  const unspentLoanFromPerson = Math.max(0, outstandingDebt - totalAssetPurchases);
+  // Calculate the absolute active loan balance (works for both Borrow and Lend)
+  const activeLoanTotal = Math.abs(netBalance);
+  const unspentLoanFromPerson = Math.max(0, activeLoanTotal - totalAssetPurchases);
 
   let maxAllowed: number | null = null;
   if (txType === 'LEND_REPAYMENT') {
@@ -337,7 +393,7 @@ export default function PersonLedgerPage() {
           amount: numericAmount,
           method,
           date,
-          description: description, // Fully optional now
+          description: description,
           source: sourceName,
           profileId: profileId !== 'NONE' ? profileId : null,
           fundingSources: [{ 
@@ -359,7 +415,7 @@ export default function PersonLedgerPage() {
           amount: newTotalExpenseAmount > 0 ? newTotalExpenseAmount : numericAmount,
           method,
           date,
-          description: description, // Fully optional
+          description: description,
           source: sourceName,
           profileId: profileId !== 'NONE' ? profileId : null,
           fundingSources: [
@@ -435,6 +491,58 @@ export default function PersonLedgerPage() {
 
   const displayTxs = [...chronologicalTxs].reverse();
 
+  // --- DATA PROCESSING (Search, Filter, Sort, Pagination) ---
+  const processedTransactions = useMemo(() => {
+    let result = [...displayTxs];
+
+    // 1. Date Filter
+    if (dateFilter === 'custom') {
+      if (customStartDate) result = result.filter(tx => tx.date.split('T')[0] >= customStartDate);
+      if (customEndDate) result = result.filter(tx => tx.date.split('T')[0] <= customEndDate);
+    } else if (dateFilter !== 'all') {
+      const startDate = getStartDate(dateFilter);
+      if (startDate) result = result.filter(tx => tx.date.split('T')[0] >= startDate);
+    }
+
+    // 2. Type Filter
+    if (filterType !== 'ALL') {
+      result = result.filter(tx => tx.type === filterType);
+    }
+
+    // 3. Search Filter
+    if (searchTerm) {
+      const lowerTerm = searchTerm.toLowerCase();
+      result = result.filter(tx => 
+        tx.description?.toLowerCase().includes(lowerTerm) ||
+        tx.transaction_method?.toLowerCase().includes(lowerTerm) ||
+        tx.displayType.toLowerCase().includes(lowerTerm)
+      );
+    }
+
+    // 4. Sort
+    result.sort((a, b) => {
+      if (sortOrder === 'date-desc') return new Date(b.date).getTime() - new Date(a.date).getTime();
+      if (sortOrder === 'date-asc') return new Date(a.date).getTime() - new Date(b.date).getTime();
+      if (sortOrder === 'amount-desc') return Number(b.amount) - Number(a.amount);
+      if (sortOrder === 'amount-asc') return Number(a.amount) - Number(b.amount);
+      return 0;
+    });
+
+    return result;
+  }, [displayTxs, searchTerm, filterType, sortOrder, dateFilter, customStartDate, customEndDate]);
+
+  const totalPages = Math.ceil(processedTransactions.length / itemsPerPage) || 1;
+  const paginatedTransactions = processedTransactions.slice(
+    (currentPage - 1) * itemsPerPage,
+    currentPage * itemsPerPage
+  );
+
+  const formatNumericBalance = (balance: number) => {
+    if (balance > 0) return `+${balance}`;
+    if (balance < 0) return `${balance}`; // includes minus naturally
+    return `0`;
+  };
+
   const finalBalanceText = netBalance > 0 
     ? `They owe you ৳${Math.abs(netBalance).toLocaleString()} (তারা আপনার কাছে ঋণী ৳${Math.abs(netBalance).toLocaleString()})` 
     : netBalance < 0 
@@ -442,7 +550,7 @@ export default function PersonLedgerPage() {
       : 'Accounts Settled (হিসাব সম্পন্ন)';
 
   const downloadCSV = () => {
-    if (!person || transactions.length === 0) return;
+    if (!person || chronologicalTxs.length === 0) return;
     
     let csvContent = `Ledger Report For (খতিয়ান রিপোর্ট):,${person.name}\n`;
     csvContent += `Generated On (তারিখ):,${formatDate(new Date())}\n\n`;
@@ -451,11 +559,12 @@ export default function PersonLedgerPage() {
     
     chronologicalTxs.forEach(row => {
       const safeRemarks = `"${(row.description || '').replace(/"/g, '""')}"`;
-      csvContent += `${row.index + 1},${formatDate(row.date)},"${row.displayType}",${safeRemarks},${row.transaction_method || '-'},${row.taken},${row.given},"${row.fullBalanceText}"\n`;
+      // Changed to formatNumericBalance for clean numeric output
+      csvContent += `${row.index + 1},${formatDate(row.date)},"${row.displayType}",${safeRemarks},${row.transaction_method || '-'},${row.taken},${row.given},${formatNumericBalance(row.runningBalanceAmt)}\n`;
     });
 
     csvContent += `\n,,,,,Overall Taken (মোট গ্রহণ),Overall Given (মোট প্রদান),Adjusted Balance (সমন্বয়কৃত জের)\n`;
-    csvContent += `,,,,,${totalTaken},${totalGiven},"${finalBalanceText}"\n`;
+    csvContent += `,,,,,${totalTaken},${totalGiven},${formatNumericBalance(netBalance)}\n`;
 
     const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -521,7 +630,7 @@ export default function PersonLedgerPage() {
       <div className="print:hidden">
         <motion.header 
           initial={{ y: -20, opacity: 0 }} animate={{ y: 0, opacity: 1 }}
-          className="px-6 pt-8 pb-4 bg-white border-b border-slate-100 flex items-center gap-4 sticky top-0 z-10"
+          className="px-6 pt-8 pb-4 bg-white border-b border-slate-100 flex items-center gap-4 sticky top-0 z-40"
         >
           <button onClick={() => router.back()} className="p-2 -ml-2 hover:bg-slate-50 rounded-full transition-colors">
             <ArrowLeft className="h-6 w-6 text-slate-700" />
@@ -529,6 +638,13 @@ export default function PersonLedgerPage() {
           <h1 className="text-xl font-bold text-slate-900 truncate flex-1">{person.name}</h1>
           
           <div className="flex gap-2">
+            {/* FILTER TOGGLE BUTTON */}
+            <button 
+              onClick={() => setShowFilters(!showFilters)}
+              className={`p-2 rounded-full transition-colors ${showFilters ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+            >
+              <SlidersHorizontal className="h-5 w-5" />
+            </button>
             <button onClick={downloadCSV} className="p-2 bg-green-50 text-green-700 rounded-full hover:bg-green-100 transition-colors" title="Download Excel">
               <FileSpreadsheet className="h-5 w-5" />
             </button>
@@ -538,7 +654,67 @@ export default function PersonLedgerPage() {
           </div>
         </motion.header>
 
-        <motion.div variants={containerVariants} initial="hidden" animate="show">
+        {/* REUSABLE LIST CONTROLS WITH SMOOTH TOGGLE & OVERFLOW FIX */}
+        <AnimatePresence>
+          {showFilters && (
+            <motion.div
+              initial={{ opacity: 0, y: -10, display: 'none' }}
+              animate={{ opacity: 1, y: 0, display: 'block' }}
+              exit={{ opacity: 0, y: -10, transitionEnd: { display: 'none' } }}
+              transition={{ duration: 0.2 }}
+              className="bg-slate-50 relative z-30"
+            >
+              <div className="pb-4">
+                <TopControls 
+                  searchTerm={searchTerm} 
+                  setSearchTerm={(val) => { setSearchTerm(val); setCurrentPage(1); }} 
+                  filterType={filterType} 
+                  setFilterType={(val) => { setFilterType(val); setCurrentPage(1); }} 
+                  filterOptions={filterOptions} 
+                  sortOrder={sortOrder} 
+                  setSortOrder={(val) => { setSortOrder(val); setCurrentPage(1); }} 
+                  sortOptions={sortOptions} 
+                  searchPlaceholder="Search records..."
+                  dateFilter={dateFilter}
+                  setDateFilter={(val) => { setDateFilter(val); setCurrentPage(1); }}
+                  dateOptions={dateFilterOptions}
+                />
+                
+                {/* Custom Date Inputs */}
+                {dateFilter === 'custom' && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: -10 }} 
+                    animate={{ opacity: 1, y: 0 }} 
+                    className="px-6 mt-3 relative z-20"
+                  >
+                    <div className="grid grid-cols-2 gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">From</label>
+                        <input 
+                          type="date" 
+                          value={customStartDate} 
+                          onChange={e => { setCustomStartDate(e.target.value); setCurrentPage(1); }} 
+                          className="w-full h-10 px-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 text-sm focus:outline-none bg-slate-50" 
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">To</label>
+                        <input 
+                          type="date" 
+                          value={customEndDate} 
+                          onChange={e => { setCustomEndDate(e.target.value); setCurrentPage(1); }} 
+                          className="w-full h-10 px-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 text-sm focus:outline-none bg-slate-50" 
+                        />
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <motion.div variants={containerVariants} initial="hidden" animate="show" className="relative z-0">
           <motion.div variants={itemVariants} className="p-6 pb-2">
             <div className={`p-8 rounded-3xl text-center shadow-sm border transition-colors duration-500 ${
               netBalance > 0 ? 'bg-green-600 border-green-700 text-white' : 
@@ -551,12 +727,19 @@ export default function PersonLedgerPage() {
             </div>
           </motion.div>
 
+          {/* INTERACTIVE METRIC CARDS */}
           <motion.div variants={itemVariants} className="px-6 mb-4 grid grid-cols-3 gap-3">
-            <div className="bg-white border border-slate-200 p-3 rounded-2xl shadow-sm flex flex-col items-center justify-center text-center">
+            <div 
+              onClick={() => { setFilterType(netBalance > 0 ? 'LEND' : 'BORROW'); setCurrentPage(1); }}
+              className={`bg-white border p-3 rounded-2xl shadow-sm flex flex-col items-center justify-center text-center cursor-pointer hover:shadow-md transition-all active:scale-95 ${['BORROW', 'LEND'].includes(filterType) ? 'border-slate-400 ring-2 ring-slate-200' : 'border-slate-200 hover:border-slate-300'}`}
+            >
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Loan Total</span>
-              <span className="text-sm font-bold text-slate-800">৳{outstandingDebt.toLocaleString()}</span>
+              <span className="text-sm font-bold text-slate-800">৳{activeLoanTotal.toLocaleString()}</span>
             </div>
-            <div className="bg-blue-50 border border-blue-100 p-3 rounded-2xl shadow-sm flex flex-col items-center justify-center text-center">
+            <div 
+              onClick={() => { setFilterType('ASSET_PURCHASE'); setCurrentPage(1); }}
+              className={`bg-blue-50 border p-3 rounded-2xl shadow-sm flex flex-col items-center justify-center text-center cursor-pointer hover:shadow-md transition-all active:scale-95 ${filterType === 'ASSET_PURCHASE' ? 'border-blue-400 ring-2 ring-blue-200' : 'border-blue-100 hover:border-blue-300'}`}
+            >
               <span className="text-[10px] font-bold text-blue-500 uppercase tracking-wider mb-1">Asset Total</span>
               <span className="text-sm font-bold text-blue-700">৳{totalAssetPurchases.toLocaleString()}</span>
             </div>
@@ -609,12 +792,20 @@ export default function PersonLedgerPage() {
           </motion.div>
 
           <motion.div variants={itemVariants} className="px-6 pb-24">
-            <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Ledger History</h3>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Ledger History</h3>
+              {filterType !== 'ALL' && (
+                <button onClick={() => { setFilterType('ALL'); setCurrentPage(1); }} className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-md hover:bg-blue-100 transition-colors">
+                  Clear Filter
+                </button>
+              )}
+            </div>
+
             <div className="space-y-3">
-              {displayTxs.length === 0 ? (
-                <p className="text-center text-slate-400 py-8 bg-white rounded-2xl border border-dashed border-slate-200">No transactions recorded yet.</p>
+              {paginatedTransactions.length === 0 ? (
+                <p className="text-center text-slate-400 py-8 bg-white rounded-2xl border border-dashed border-slate-200">No transactions match your filters.</p>
               ) : (
-                displayTxs.map((tx) => {
+                paginatedTransactions.map((tx) => {
                   const isExpanded = expandedTxId === tx.id;
                   const isAsset = tx.type === 'ASSET_PURCHASE';
                   
@@ -689,6 +880,21 @@ export default function PersonLedgerPage() {
                 })
               )}
             </div>
+
+            {/* REUSABLE PAGINATION CONTROLS */}
+            {!isLoading && (
+              <motion.div variants={itemVariants}>
+                <PaginationControls 
+                   currentPage={currentPage} 
+                   totalPages={totalPages} 
+                   itemsPerPage={itemsPerPage} 
+                   setItemsPerPage={setItemsPerPage} 
+                   setCurrentPage={setCurrentPage} 
+                   totalItems={processedTransactions.length}
+                />
+              </motion.div>
+            )}
+
           </motion.div>
         </motion.div>
 
@@ -879,7 +1085,10 @@ export default function PersonLedgerPage() {
                 <td className="border border-slate-300 px-4 py-3 whitespace-nowrap">{row.transaction_method || '-'}</td>
                 <td className="border border-slate-300 px-4 py-3 text-green-700 font-medium whitespace-nowrap">{row.taken}</td>
                 <td className="border border-slate-300 px-4 py-3 text-red-700 font-medium whitespace-nowrap">{row.given}</td>
-                <td className="border border-slate-300 px-4 py-3 font-bold whitespace-nowrap">{row.fullBalanceText}</td>
+                {/* Numeric Balance specifically formatted per prompt request */}
+                <td className="border border-slate-300 px-4 py-3 font-bold whitespace-nowrap">
+                  {formatNumericBalance(row.runningBalanceAmt)}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -899,7 +1108,7 @@ export default function PersonLedgerPage() {
             <div className="flex justify-between border-t border-slate-300 pt-4 text-base">
               <span className="font-semibold text-slate-900">Adjusted Balance (সমন্বয়কৃত জের):</span>
               <span className={`font-bold text-lg text-right ml-4 ${netBalance > 0 ? 'text-green-700' : netBalance < 0 ? 'text-red-700' : 'text-slate-900'}`}>
-                {finalBalanceText}
+                {formatNumericBalance(netBalance)}
               </span>
             </div>
           </div>
