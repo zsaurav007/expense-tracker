@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { motion, Variants } from 'framer-motion';
 import { 
   Bell, ArrowUpRight, ArrowDownRight, Wallet, 
-  HandCoins, History, Users, Download, FileSpreadsheet, Printer, LogOut, FileText 
+  HandCoins, History, Users, Download, FileSpreadsheet, Printer, LogOut, FileText, ShoppingBag
 } from 'lucide-react';
 import DashboardCharts from '@/components/DashboardCharts';
 import CustomDropdown from '@/components/CustomDropdown';
@@ -133,37 +133,47 @@ export default function DashboardClient({
   let totalBalance = 0;
   let currentDebt = 0; 
   let totalLoanFundedAssets = 0;
+  
+  let totalCreditPurchased = 0;
+  let totalCreditRepaid = 0;
+
   const peopleBalances: Record<string, { id: string, name: string, balance: number }> = {};
 
   transactions.forEach((tx) => {
     const amt = Number(tx.amount);
     
     // 1. Calculate Main Wallet Balance
+    // NOTE: CREDIT_EXPENSE does not deduct money. CREDIT_REPAYMENT DOES deduct money.
     if (['INCOME', 'BORROW', 'LEND_REPAYMENT'].includes(tx.type)) totalBalance += amt;
-    if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE'].includes(tx.type)) totalBalance -= amt;
+    if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_REPAYMENT'].includes(tx.type)) totalBalance -= amt;
 
-    // 2. Calculate Active Debt for Unspent Loan Math
+    // 2. Calculate Active Debt for Unspent Loan Math (Standard Loans)
     if (tx.type === 'BORROW') currentDebt += amt;
     if (tx.type === 'BORROW_REPAYMENT') currentDebt -= amt;
 
-    // 3. Tally up Assets bought using Loan Funds
+    // 3. Calculate Pay Later / Credit Math
+    if (tx.type === 'CREDIT_EXPENSE') totalCreditPurchased += amt;
+    if (tx.type === 'CREDIT_REPAYMENT') totalCreditRepaid += amt;
+
+    // 4. Tally up Assets bought using Loan Funds
     if (tx.transaction_fundings && tx.transaction_fundings.length > 0) {
       tx.transaction_fundings.forEach(funding => {
         totalLoanFundedAssets += Number(funding.amount);
       });
     }
 
-    // 4. Calculate Individual Ledgers
+    // 5. Calculate Individual Ledgers
     if (tx.person_id && tx.people_profiles) {
       if (!peopleBalances[tx.person_id]) peopleBalances[tx.person_id] = { id: tx.person_id, name: tx.people_profiles.name, balance: 0 };
       if (tx.type === 'LEND') peopleBalances[tx.person_id].balance += amt;
       if (tx.type === 'LEND_REPAYMENT') peopleBalances[tx.person_id].balance -= amt;
-      if (tx.type === 'BORROW') peopleBalances[tx.person_id].balance -= amt;
-      if (tx.type === 'BORROW_REPAYMENT') peopleBalances[tx.person_id].balance += amt;
+      if (['BORROW', 'CREDIT_EXPENSE'].includes(tx.type)) peopleBalances[tx.person_id].balance -= amt;
+      if (['BORROW_REPAYMENT', 'CREDIT_REPAYMENT'].includes(tx.type)) peopleBalances[tx.person_id].balance += amt;
     }
   });
 
   const unspentLoanMoney = Math.max(0, currentDebt - totalLoanFundedAssets);
+  const unpaidCreditDue = Math.max(0, totalCreditPurchased - totalCreditRepaid);
   const ownMoney = totalBalance - unspentLoanMoney;
 
   const owesYou = Object.values(peopleBalances).filter(p => p.balance > 0);
@@ -193,7 +203,8 @@ export default function DashboardClient({
   chartTxs.forEach((tx) => {
     const amt = Number(tx.amount);
     if (['INCOME', 'BORROW', 'LEND_REPAYMENT'].includes(tx.type)) filteredIncome += amt;
-    if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE'].includes(tx.type)) filteredExpense += amt;
+    // We visually count standard expenses and asset purchases for chart tracking
+    if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_REPAYMENT'].includes(tx.type)) filteredExpense += amt;
   });
 
   const prepareChartData = () => {
@@ -218,14 +229,14 @@ export default function DashboardClient({
 
       if (!map[key]) map[key] = { month: label, income: 0, expense: 0 };
       if (['INCOME', 'BORROW', 'LEND_REPAYMENT'].includes(tx.type)) map[key].income += Number(tx.amount);
-      if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE'].includes(tx.type)) map[key].expense += Number(tx.amount);
+      if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_REPAYMENT'].includes(tx.type)) map[key].expense += Number(tx.amount);
     });
     return Object.values(map);
   };
 
   const categoryMap: Record<string, number> = {};
   chartTxs.forEach((tx) => {
-    if (tx.type === 'EXPENSE') {
+    if (tx.type === 'EXPENSE' || tx.type === 'CREDIT_EXPENSE') {
       const cat = tx.expense_profiles?.name || 'General';
       categoryMap[cat] = (categoryMap[cat] || 0) + Number(tx.amount);
     }
@@ -246,7 +257,7 @@ export default function DashboardClient({
     }
     
     const isIncomeType = ['INCOME', 'BORROW', 'LEND_REPAYMENT'].includes(t.type);
-    const isExpenseType = ['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE'].includes(t.type);
+    const isExpenseType = ['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_EXPENSE', 'CREDIT_REPAYMENT'].includes(t.type);
 
     if (reportType === 'INCOME' && !isIncomeType) return false;
     if (reportType === 'EXPENSE' && !isExpenseType) return false;
@@ -258,8 +269,8 @@ export default function DashboardClient({
   reportTxs.forEach(t => {
     const amt = Number(t.amount);
     if (t.type === 'INCOME') repIncome += amt;
-    if (['EXPENSE', 'ASSET_PURCHASE'].includes(t.type)) repExpense += amt;
-    if (['LEND', 'BORROW_REPAYMENT'].includes(t.type)) repLend += amt;
+    if (['EXPENSE', 'ASSET_PURCHASE', 'CREDIT_EXPENSE'].includes(t.type)) repExpense += amt;
+    if (['LEND', 'BORROW_REPAYMENT', 'CREDIT_REPAYMENT'].includes(t.type)) repLend += amt;
     if (['BORROW', 'LEND_REPAYMENT'].includes(t.type)) repBorrow += amt;
   });
 
@@ -269,6 +280,8 @@ export default function DashboardClient({
     if (type === 'LEND_REPAYMENT') return 'Installment Received';
     if (type === 'BORROW_REPAYMENT') return 'Installment Paid';
     if (type === 'ASSET_PURCHASE') return 'Asset Purchase';
+    if (type === 'CREDIT_EXPENSE') return 'Credit Purchase';
+    if (type === 'CREDIT_REPAYMENT') return 'Credit Debt Paid';
     return type.charAt(0).toUpperCase() + type.slice(1).toLowerCase();
   };
 
@@ -286,7 +299,7 @@ export default function DashboardClient({
     reportTxs.forEach((tx, i) => {
       const name = tx.expense_profiles?.name || tx.people_profiles?.name || tx.source_or_method || 'Unknown';
       const remarks = `"${(tx.description || '').replace(/"/g, '""')}"`;
-      const isOut = ['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE'].includes(tx.type);
+      const isOut = ['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_EXPENSE', 'CREDIT_REPAYMENT'].includes(tx.type);
       const incAmt = !isOut ? tx.amount : '';
       const expAmt = isOut ? tx.amount : '';
       
@@ -367,14 +380,18 @@ export default function DashboardClient({
             </h2>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 border-t border-slate-100 pt-5">
+          <div className="grid grid-cols-3 gap-2 border-t border-slate-100 pt-5">
             <div className="text-center">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Your Own Money</p>
-              <p className="text-xl font-bold text-blue-600">৳{ownMoney.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Own Money</p>
+              <p className="text-lg font-bold text-blue-600">৳{ownMoney.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
             </div>
             <div className="text-center border-l border-slate-100">
-              <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Unspent Loan</p>
-              <p className="text-xl font-bold text-orange-500">৳{unspentLoanMoney.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Unspent Loan</p>
+              <p className="text-lg font-bold text-orange-500">৳{unspentLoanMoney.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+            </div>
+            <div className="text-center border-l border-slate-100">
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Unpaid Credit</p>
+              <p className="text-lg font-bold text-red-500">৳{unpaidCreditDue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
             </div>
           </div>
         </motion.section>
@@ -434,7 +451,7 @@ export default function DashboardClient({
                 <div className="flex justify-between items-center mb-3 border-b border-slate-100 pb-2">
                   <div className="flex items-center gap-2">
                     <Users className="h-4 w-4 text-green-600" />
-                    <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Loan Receivable</h3>
+                    <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Receivable</h3>
                   </div>
                   <span className="text-xs font-bold text-green-600">৳{totalOwesYou.toLocaleString()}</span>
                 </div>
@@ -454,7 +471,7 @@ export default function DashboardClient({
                 <div className="flex justify-between items-center mb-3 border-b border-slate-100 pb-2">
                   <div className="flex items-center gap-2">
                     <Users className="h-4 w-4 text-red-600" />
-                    <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Loan Payable</h3>
+                    <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Payable</h3>
                   </div>
                   <span className="text-xs font-bold text-red-600">৳{totalYouOwe.toLocaleString()}</span>
                 </div>
@@ -489,7 +506,7 @@ export default function DashboardClient({
                 let route = '/dashboard';
                 let displayName = tx.source_or_method || 'Unknown';
 
-                if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE'].includes(tx.type)) { 
+                if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_EXPENSE', 'CREDIT_REPAYMENT'].includes(tx.type)) { 
                   colorClass = 'text-red-600'; 
                   bgClass = 'bg-red-50 border-red-100'; 
                   isPositive = false; 
@@ -527,6 +544,18 @@ export default function DashboardClient({
                   displayName = `Asset: ${tx.source_or_method || 'Unknown'}`;
                   route = '/dashboard/expense';
                 }
+                else if (tx.type === 'CREDIT_EXPENSE') {
+                  Icon = ShoppingBag;
+                  colorClass = 'text-blue-600';
+                  bgClass = 'bg-blue-50 border-blue-100';
+                  displayName = `Credit Purchase (${tx.expense_profiles?.name || tx.source_or_method || 'Unknown'})`;
+                  route = '/dashboard/expense';
+                }
+                else if (tx.type === 'CREDIT_REPAYMENT') {
+                  Icon = Wallet;
+                  displayName = `Due Paid to ${tx.people_profiles?.name || 'Unknown'}`;
+                  route = `/dashboard/ledger/${tx.person_id}`;
+                }
 
                 return (
                   <Link key={tx.id} href={route} className="flex items-center justify-between p-4 bg-white rounded-xl border border-slate-100 shadow-sm active:bg-slate-50 transition-colors">
@@ -537,7 +566,10 @@ export default function DashboardClient({
                         <p className="text-xs text-slate-500 mt-1 break-words">{formatDate(tx.date)} • {tx.transaction_method || 'Unknown'}</p>
                       </div>
                     </div>
-                    <p className={`font-bold shrink-0 whitespace-nowrap pl-2 ${colorClass}`}>{isPositive ? '+' : '-'}৳{Number(tx.amount).toLocaleString()}</p>
+                    <div className="flex flex-col items-end gap-1 shrink-0 text-right">
+                      <p className={`font-bold whitespace-nowrap pl-2 ${colorClass}`}>{isPositive ? '+' : '-'}৳{Number(tx.amount).toLocaleString()}</p>
+                      {tx.type === 'CREDIT_EXPENSE' && <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">(Unpaid)</p>}
+                    </div>
                   </Link>
                 );
               })
@@ -625,7 +657,7 @@ export default function DashboardClient({
             <tbody>
               {reportTxs.map((tx, index) => {
                 const name = tx.expense_profiles?.name || tx.people_profiles?.name || tx.source_or_method || 'Unknown';
-                const isOut = ['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE'].includes(tx.type);
+                const isOut = ['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_EXPENSE', 'CREDIT_REPAYMENT'].includes(tx.type);
                 return (
                   <tr key={tx.id} className="hover:bg-slate-50 break-inside-avoid">
                     <td className="border border-slate-300 px-4 py-3 text-center">{index + 1}</td>
@@ -651,7 +683,7 @@ export default function DashboardClient({
             <div className="w-[450px] bg-slate-50 border border-slate-200 rounded-xl p-6">
               <h3 className="text-lg font-bold text-slate-800 border-b border-slate-200 pb-3 mb-4 uppercase tracking-wider">Report Summary</h3>
               <div className="flex justify-between mb-3 text-sm"><span>Total Income:</span><span className="font-bold text-green-700">+৳{repIncome.toLocaleString()}</span></div>
-              <div className="flex justify-between mb-3 text-sm"><span>Total Expense:</span><span className="font-bold text-red-700">-৳{repExpense.toLocaleString()}</span></div>
+              <div className="flex justify-between mb-3 text-sm"><span>Total Expense (Includes Unpaid Credit):</span><span className="font-bold text-red-700">-৳{repExpense.toLocaleString()}</span></div>
               <div className="flex justify-between mb-3 text-sm"><span>Money In (Loans/Received):</span><span className="font-bold text-blue-700">+৳{repBorrow.toLocaleString()}</span></div>
               <div className="flex justify-between mb-5 text-sm"><span>Money Out (Loans/Paid):</span><span className="font-bold text-orange-700">-৳{repLend.toLocaleString()}</span></div>
               

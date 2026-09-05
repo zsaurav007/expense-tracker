@@ -12,7 +12,7 @@ import CustomDropdown from '@/components/CustomDropdown';
 import { TopControls, PaginationControls } from '@/components/ListControls';
 
 // --- TYPESCRIPT INTERFACES ---
-type TxType = 'LEND' | 'BORROW' | 'LEND_REPAYMENT' | 'BORROW_REPAYMENT' | 'ASSET_PURCHASE' | 'EXPENSE';
+type TxType = 'LEND' | 'BORROW' | 'LEND_REPAYMENT' | 'BORROW_REPAYMENT' | 'ASSET_PURCHASE' | 'EXPENSE' | 'CREDIT_EXPENSE' | 'CREDIT_REPAYMENT';
 
 interface Transaction {
   id: string;
@@ -96,7 +96,7 @@ export default function PersonLedgerPage() {
   const router = useRouter();
   const params = useParams();
   
-  const [person, setPerson] = useState<{ id: string, name: string } | null>(null);
+  const [person, setPerson] = useState<{ id: string, name: string, profile_type?: string } | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [expenseProfiles, setExpenseProfiles] = useState<ProfileOption[]>([]);
   const [netBalance, setNetBalance] = useState(0);
@@ -117,7 +117,13 @@ export default function PersonLedgerPage() {
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
 
-  const filterOptions = [
+  const isPayLaterProfile = person?.profile_type === 'PAY_LATER';
+
+  const filterOptions = isPayLaterProfile ? [
+    { label: 'All Transactions', value: 'ALL' },
+    { label: 'Credit Purchases', value: 'CREDIT_EXPENSE' },
+    { label: 'Payments', value: 'CREDIT_REPAYMENT' },
+  ] : [
     { label: 'All Transactions', value: 'ALL' },
     { label: 'Loan Given', value: 'LEND' },
     { label: 'Loan Taken', value: 'BORROW' },
@@ -163,6 +169,7 @@ export default function PersonLedgerPage() {
   const [methods, setMethods] = useState([
     { label: 'Cash', value: 'Cash' }, { label: 'Bank', value: 'Bank' },
     { label: 'bKash', value: 'bKash' }, { label: 'Nagad', value: 'Nagad' },
+    { label: 'On Credit', value: 'On Credit' }
   ]);
 
   const fetchLedger = async () => {
@@ -223,7 +230,7 @@ export default function PersonLedgerPage() {
     setEditingTxId(null);
     setAmount('');
     setOriginalAmount(0);
-    setMethod('');
+    setMethod(isPayLaterProfile && txType === 'CREDIT_EXPENSE' ? 'On Credit' : '');
     setDescription('');
     setDate(todayDate);
     setProfileId('');
@@ -235,6 +242,7 @@ export default function PersonLedgerPage() {
     resetForm();
     setTxType(type);
     setRepayMode('REPAYMENT'); 
+    if (type === 'CREDIT_EXPENSE') setMethod('On Credit');
     setShowModal(true);
   };
 
@@ -282,6 +290,15 @@ export default function PersonLedgerPage() {
       setMethod(tx.transaction_method);
       setDate(tx.date); 
       setDescription((tx.description || '').replace('(Edited)', '').trim());
+      
+      if (tx.type === 'CREDIT_EXPENSE') {
+        const fullTx = await fetchFullTx(tx.id);
+        if (fullTx) {
+          setProfileId(fullTx.expense_profile_id || 'NONE');
+          setOneTimeName(!fullTx.expense_profile_id ? fullTx.source_or_method : '');
+        }
+      }
+
       setShowModal(true);
     }
   };
@@ -347,13 +364,12 @@ export default function PersonLedgerPage() {
     if (tx.type === 'ASSET_PURCHASE') totalAssetPurchases += Number(tx.amount);
   });
 
-  // Calculate the absolute active loan balance (works for both Borrow and Lend)
   const activeLoanTotal = Math.abs(netBalance);
   const unspentLoanFromPerson = Math.max(0, activeLoanTotal - totalAssetPurchases);
 
   let maxAllowed: number | null = null;
-  if (txType === 'LEND_REPAYMENT') {
-    maxAllowed = Number((editingTxId ? netBalance + originalAmount : netBalance).toFixed(2));
+  if (txType === 'LEND_REPAYMENT' || txType === 'CREDIT_REPAYMENT') {
+    maxAllowed = Number((editingTxId ? Math.abs(netBalance) + originalAmount : Math.abs(netBalance)).toFixed(2));
   } else if (txType === 'BORROW_REPAYMENT') {
     if (repayMode === 'ASSET') {
       maxAllowed = Number((editingTxId ? unspentLoanFromPerson + originalAmount : unspentLoanFromPerson).toFixed(2));
@@ -377,12 +393,18 @@ export default function PersonLedgerPage() {
     let payload: any = {
       type: txType,
       amount: numericAmount,
-      method,
+      method: txType === 'CREDIT_EXPENSE' ? 'On Credit' : method,
       date,
       description,
       personId: params.id as string,
       source: person?.name || 'Ledger', 
     };
+
+    if (txType === 'CREDIT_EXPENSE') {
+      const sourceName = profileId === 'NONE' ? (oneTimeName.trim() || 'General Expense') : expenseProfiles.find(p => p.value === profileId)?.label;
+      payload.source = sourceName;
+      payload.profileId = profileId !== 'NONE' ? profileId : null;
+    }
 
     if (txType === 'BORROW_REPAYMENT' && repayMode === 'ASSET') {
       const sourceName = profileId === 'NONE' ? (oneTimeName.trim() || 'General Expense') : expenseProfiles.find(p => p.value === profileId)?.label;
@@ -450,10 +472,21 @@ export default function PersonLedgerPage() {
     setIsSaving(false);
   };
 
+  // Dynamically prepare clean payment methods (removes 'On Credit' for repayment)
+  const activeMethods = txType === 'CREDIT_REPAYMENT' ? methods.filter(m => m.value !== 'On Credit') : methods;
+
   // --- DATA CALCULATION FOR UI & REPORTS ---
   let runningBalance = 0;
-  let totalGiven = 0;
-  let totalTaken = 0;
+  
+  // LEND_BORROW Metrics
+  let totalGivenLoan = 0;
+  let totalTakenLoan = 0;
+  let totalReceived = 0;
+  let totalPaid = 0;
+
+  // PAY_LATER Metrics
+  let totalCreditPurchased = 0;
+  let totalCreditPaid = 0;
   
   const chronologicalTxs: DisplayTransaction[] = [...transactions].reverse().map((tx, index) => {
     let displayType = '';
@@ -462,26 +495,30 @@ export default function PersonLedgerPage() {
     const amt = Number(tx.amount);
 
     if (tx.type === 'LEND') { 
-      displayType = 'Loan Given (ঋণ দেওয়া)'; given = amt.toString(); totalGiven += amt; runningBalance += amt;
+      displayType = 'Loan Given (ঋণ দেওয়া)'; given = amt.toString(); totalGivenLoan += amt; runningBalance += amt;
     } else if (tx.type === 'BORROW') { 
-      displayType = 'Loan Taken (ঋণ নেওয়া)'; taken = amt.toString(); totalTaken += amt; runningBalance -= amt;
+      displayType = 'Loan Taken (ঋণ নেওয়া)'; taken = amt.toString(); totalTakenLoan += amt; runningBalance -= amt;
     } else if (tx.type === 'LEND_REPAYMENT') { 
-      displayType = 'Received Installment (কিস্তি গ্রহণ)'; taken = amt.toString(); totalTaken += amt; runningBalance -= amt;
+      displayType = 'Received Installment (কিস্তি গ্রহণ)'; taken = amt.toString(); totalReceived += amt; runningBalance -= amt;
     } else if (tx.type === 'BORROW_REPAYMENT') { 
-      displayType = 'Paid Installment (কিস্তি প্রদান)'; given = amt.toString(); totalGiven += amt; runningBalance += amt;
+      displayType = 'Paid Installment (কিস্তি প্রদান)'; given = amt.toString(); totalPaid += amt; runningBalance += amt;
     } else if (tx.type === 'ASSET_PURCHASE') {
       displayType = 'Asset Purchase (সম্পদ ক্রয়)'; given = '-'; taken = '-'; 
+    } else if (tx.type === 'CREDIT_EXPENSE') {
+      displayType = 'Credit Purchase (বাকিতে ক্রয়)'; taken = amt.toString(); totalCreditPurchased += amt; runningBalance -= amt;
+    } else if (tx.type === 'CREDIT_REPAYMENT') {
+      displayType = 'Due Paid (বকেয়া পরিশোধ)'; given = amt.toString(); totalCreditPaid += amt; runningBalance += amt;
     }
 
     let shortBalanceText = 'Settled';
     let fullBalanceText = 'Accounts Settled (হিসাব সম্পন্ন)';
     
     if (runningBalance > 0) {
-      shortBalanceText = `Loan Receivable ৳${Math.abs(runningBalance).toLocaleString()}`;
-      fullBalanceText = `Loan Receivable ৳${Math.abs(runningBalance).toLocaleString()} (তারা আপনার কাছে ঋণী ৳${Math.abs(runningBalance).toLocaleString()})`;
+      shortBalanceText = isPayLaterProfile ? `Advance ৳${Math.abs(runningBalance).toLocaleString()}` : `Loan Receivable ৳${Math.abs(runningBalance).toLocaleString()}`;
+      fullBalanceText = isPayLaterProfile ? `Advance ৳${Math.abs(runningBalance).toLocaleString()}` : `Loan Receivable ৳${Math.abs(runningBalance).toLocaleString()} (তারা আপনার কাছে ঋণী ৳${Math.abs(runningBalance).toLocaleString()})`;
     } else if (runningBalance < 0) {
-      shortBalanceText = `Loan Payable ৳${Math.abs(runningBalance).toLocaleString()}`;
-      fullBalanceText = `Loan Payable ৳${Math.abs(runningBalance).toLocaleString()} (আপনি তাদের কাছে ঋণী ৳${Math.abs(runningBalance).toLocaleString()})`;
+      shortBalanceText = isPayLaterProfile ? `Total Loan ৳${Math.abs(runningBalance).toLocaleString()}` : `Loan Payable ৳${Math.abs(runningBalance).toLocaleString()}`;
+      fullBalanceText = isPayLaterProfile ? `Total Loan ৳${Math.abs(runningBalance).toLocaleString()}` : `Loan Payable ৳${Math.abs(runningBalance).toLocaleString()} (আপনি তাদের কাছে ঋণী ৳${Math.abs(runningBalance).toLocaleString()})`;
     }
 
     return { 
@@ -495,7 +532,6 @@ export default function PersonLedgerPage() {
   const processedTransactions = useMemo(() => {
     let result = [...displayTxs];
 
-    // 1. Date Filter
     if (dateFilter === 'custom') {
       if (customStartDate) result = result.filter(tx => tx.date.split('T')[0] >= customStartDate);
       if (customEndDate) result = result.filter(tx => tx.date.split('T')[0] <= customEndDate);
@@ -504,12 +540,10 @@ export default function PersonLedgerPage() {
       if (startDate) result = result.filter(tx => tx.date.split('T')[0] >= startDate);
     }
 
-    // 2. Type Filter
     if (filterType !== 'ALL') {
       result = result.filter(tx => tx.type === filterType);
     }
 
-    // 3. Search Filter
     if (searchTerm) {
       const lowerTerm = searchTerm.toLowerCase();
       result = result.filter(tx => 
@@ -519,7 +553,6 @@ export default function PersonLedgerPage() {
       );
     }
 
-    // 4. Sort
     result.sort((a, b) => {
       if (sortOrder === 'date-desc') return new Date(b.date).getTime() - new Date(a.date).getTime();
       if (sortOrder === 'date-asc') return new Date(a.date).getTime() - new Date(b.date).getTime();
@@ -543,11 +576,8 @@ export default function PersonLedgerPage() {
     return `0`;
   };
 
-  const finalBalanceText = netBalance > 0 
-    ? `Loan Receivable ৳${Math.abs(netBalance).toLocaleString()} (তারা আপনার কাছে ঋণী ৳${Math.abs(netBalance).toLocaleString()})` 
-    : netBalance < 0 
-      ? `Loan Payable ৳${Math.abs(netBalance).toLocaleString()} (আপনি তাদের কাছে ঋণী ৳${Math.abs(netBalance).toLocaleString()})` 
-      : 'Accounts Settled (হিসাব সম্পন্ন)';
+  const showGiven = isPayLaterProfile ? totalCreditPaid : totalGivenLoan + totalPaid;
+  const showTaken = isPayLaterProfile ? totalCreditPurchased : totalTakenLoan + totalReceived;
 
   const downloadCSV = () => {
     if (!person || chronologicalTxs.length === 0) return;
@@ -568,7 +598,7 @@ export default function PersonLedgerPage() {
     });
 
     csvContent += `\n,,,,,Overall Taken (মোট গ্রহণ),Overall Given (মোট প্রদান),Adjusted Balance (সমন্বয়কৃত জের)\n`;
-    csvContent += `,,,,,${totalTaken},${totalGiven},${formatNumericBalance(netBalance)}\n`;
+    csvContent += `,,,,,${showTaken},${showGiven},${formatNumericBalance(netBalance)}\n`;
 
     const blob = new Blob(["\uFEFF" + csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -596,6 +626,8 @@ export default function PersonLedgerPage() {
       case 'LEND': return { title: `Give Loan to ${person?.name}`, bg: "bg-red-50", color: "text-red-600" };
       case 'BORROW': return { title: `Take Loan from ${person?.name}`, bg: "bg-green-50", color: "text-green-600" };
       case 'LEND_REPAYMENT': return { title: `Receive Installment from ${person?.name}`, bg: "bg-green-50", color: "text-green-600" };
+      case 'CREDIT_EXPENSE': return { title: `Add Credit Purchase from ${person?.name}`, bg: "bg-blue-50", color: "text-blue-600" };
+      case 'CREDIT_REPAYMENT': return { title: `Pay Due to ${person?.name}`, bg: "bg-red-50", color: "text-red-600" };
       case 'BORROW_REPAYMENT': 
         return { 
           title: repayMode === 'ASSET' ? `Buy Asset via ${person?.name}'s Loan` : `Pay Installment to ${person?.name}`, 
@@ -606,10 +638,10 @@ export default function PersonLedgerPage() {
     }
   };
 
-  // Determine active click filters
-  const loanFilterTarget = netBalance > 0 ? 'LEND' : 'BORROW';
+  const loanFilterTarget = isPayLaterProfile ? 'CREDIT_REPAYMENT' : (netBalance > 0 ? 'LEND' : 'BORROW');
   const isLoanFilterActive = filterType === loanFilterTarget;
-  const isAssetFilterActive = filterType === 'ASSET_PURCHASE';
+  const assetFilterTarget = isPayLaterProfile ? 'CREDIT_EXPENSE' : 'ASSET_PURCHASE';
+  const isAssetFilterActive = filterType === assetFilterTarget;
 
   if (isLoading) return <div className="min-h-screen flex items-center justify-center text-slate-400">Loading ledger...</div>;
   if (!person) return <div className="min-h-screen flex items-center justify-center text-slate-400">Person not found</div>;
@@ -647,7 +679,6 @@ export default function PersonLedgerPage() {
           <h1 className="text-xl font-bold text-slate-900 truncate flex-1">{person.name}</h1>
           
           <div className="flex gap-2">
-            {/* FILTER TOGGLE BUTTON */}
             <button 
               onClick={() => setShowFilters(!showFilters)}
               className={`p-2 rounded-full transition-colors ${showFilters ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
@@ -663,7 +694,6 @@ export default function PersonLedgerPage() {
           </div>
         </motion.header>
 
-        {/* REUSABLE LIST CONTROLS WITH SMOOTH TOGGLE & OVERFLOW FIX */}
         <AnimatePresence>
           {showFilters && (
             <motion.div
@@ -730,7 +760,10 @@ export default function PersonLedgerPage() {
               netBalance < 0 ? 'bg-red-600 border-red-700 text-white' : 'bg-white border-slate-200 text-slate-800'
             }`}>
               <p className="text-sm font-medium mb-2 opacity-90">
-                {netBalance > 0 ? `Loan Receivable from ${person.name}` : netBalance < 0 ? `Loan Payable to ${person.name}` : 'Accounts Settled'}
+                {isPayLaterProfile 
+                  ? (netBalance > 0 ? `Advance to ${person.name}` : netBalance < 0 ? `Total Loan from ${person.name}` : 'Accounts Settled')
+                  : (netBalance > 0 ? `Loan Receivable from ${person.name}` : netBalance < 0 ? `Loan Payable to ${person.name}` : 'Accounts Settled')
+                }
               </p>
               <h2 className="text-5xl font-extrabold tracking-tight">৳{Math.abs(netBalance).toLocaleString()}</h2>
             </div>
@@ -745,65 +778,143 @@ export default function PersonLedgerPage() {
               }}
               className={`bg-white border p-3 rounded-2xl shadow-sm flex flex-col items-center justify-center text-center cursor-pointer hover:shadow-md transition-all active:scale-95 ${isLoanFilterActive ? 'border-slate-400 ring-2 ring-slate-200' : 'border-slate-200 hover:border-slate-300'}`}
             >
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Loan Total</span>
-              <span className="text-sm font-bold text-slate-800">৳{activeLoanTotal.toLocaleString()}</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 leading-tight text-center">
+                {isPayLaterProfile ? 'Total Paid' : 'Loan Total'}
+              </span>
+              <span className="text-sm font-bold text-slate-800">৳{isPayLaterProfile ? totalCreditPaid.toLocaleString() : activeLoanTotal.toLocaleString()}</span>
             </div>
             <div 
               onClick={() => { 
-                setFilterType(isAssetFilterActive ? 'ALL' : 'ASSET_PURCHASE'); 
+                setFilterType(isAssetFilterActive ? 'ALL' : assetFilterTarget); 
                 setCurrentPage(1); 
               }}
               className={`bg-blue-50 border p-3 rounded-2xl shadow-sm flex flex-col items-center justify-center text-center cursor-pointer hover:shadow-md transition-all active:scale-95 ${isAssetFilterActive ? 'border-blue-400 ring-2 ring-blue-200' : 'border-blue-100 hover:border-blue-300'}`}
             >
-              <span className="text-[10px] font-bold text-blue-500 uppercase tracking-wider mb-1">Asset Total</span>
-              <span className="text-sm font-bold text-blue-700">৳{totalAssetPurchases.toLocaleString()}</span>
+              <span className="text-[10px] font-bold text-blue-500 uppercase tracking-wider mb-1 leading-tight text-center">
+                {isPayLaterProfile ? 'Credit Expense' : 'Asset Total'}
+              </span>
+              <span className="text-sm font-bold text-blue-700">৳{isPayLaterProfile ? totalCreditPurchased.toLocaleString() : totalAssetPurchases.toLocaleString()}</span>
             </div>
             <div className="bg-orange-50 border border-orange-100 p-3 rounded-2xl shadow-sm flex flex-col items-center justify-center text-center">
-              <span className="text-[10px] font-bold text-orange-500 uppercase tracking-wider mb-1">Cash in Hand</span>
-              <span className="text-sm font-bold text-orange-700">৳{unspentLoanFromPerson.toLocaleString()}</span>
+              <span className="text-[10px] font-bold text-orange-500 uppercase tracking-wider mb-1 leading-tight text-center">
+                {isPayLaterProfile ? 'Amount Due' : 'Cash in Hand'}
+              </span>
+              <span className="text-sm font-bold text-orange-700">৳{isPayLaterProfile ? Math.abs(netBalance).toLocaleString() : unspentLoanFromPerson.toLocaleString()}</span>
             </div>
           </motion.div>
 
           <motion.div variants={itemVariants} className="px-6 py-4 mx-6 mb-4 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col gap-2 text-sm">
-            <div className="flex justify-between items-center">
-              <span className="text-slate-500 font-medium">Overall Loan Given:</span>
-              <span className="font-bold text-red-600">৳{totalGiven.toLocaleString()}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-slate-500 font-medium">Overall Loan Taken:</span>
-              <span className="font-bold text-green-600">৳{totalTaken.toLocaleString()}</span>
-            </div>
+            {isPayLaterProfile ? (
+              <>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 font-medium">Total Credit Purchased:</span>
+                  <span className="font-bold text-red-600">৳{totalCreditPurchased.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-500 font-medium">Total Paid:</span>
+                  <span className="font-bold text-green-600">৳{totalCreditPaid.toLocaleString()}</span>
+                </div>
+              </>
+            ) : (
+              <>
+                {(totalGivenLoan > 0 && totalTakenLoan === 0) ? (
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500 font-medium">Overall Loan Given:</span>
+                    <span className="font-bold text-red-600">৳{totalGivenLoan.toLocaleString()}</span>
+                  </div>
+                ) : (totalTakenLoan > 0 && totalGivenLoan === 0) ? (
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500 font-medium">Overall Loan Taken:</span>
+                    <span className="font-bold text-green-600">৳{totalTakenLoan.toLocaleString()}</span>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-500 font-medium">Overall Loan Given:</span>
+                      <span className="font-bold text-red-600">৳{totalGivenLoan.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-500 font-medium">Overall Loan Taken:</span>
+                      <span className="font-bold text-green-600">৳{totalTakenLoan.toLocaleString()}</span>
+                    </div>
+                  </>
+                )}
+                
+                {/* Dynamically Hide Total Received / Paid Based on Net Balance */}
+                {netBalance > 0 && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500 font-medium">Total Received:</span>
+                    <span className="font-bold text-green-600">৳{totalReceived.toLocaleString()}</span>
+                  </div>
+                )}
+                {netBalance < 0 && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-slate-500 font-medium">Total Paid:</span>
+                    <span className="font-bold text-red-600">৳{totalPaid.toLocaleString()}</span>
+                  </div>
+                )}
+                {netBalance === 0 && (
+                  <>
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-500 font-medium">Total Received:</span>
+                      <span className="font-bold text-green-600">৳{totalReceived.toLocaleString()}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-500 font-medium">Total Paid:</span>
+                      <span className="font-bold text-red-600">৳{totalPaid.toLocaleString()}</span>
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+
             <div className="flex justify-between items-center pt-2 border-t border-slate-100 mt-1">
               <span className="text-slate-700 font-bold">Adjusted Balance:</span>
               <span className={`font-bold ${netBalance > 0 ? 'text-green-600' : netBalance < 0 ? 'text-red-600' : 'text-slate-900'}`}>
-                {netBalance > 0 ? `Loan Receivable ৳${Math.abs(netBalance).toLocaleString()}` : netBalance < 0 ? `Loan Payable ৳${Math.abs(netBalance).toLocaleString()}` : 'Settled'}
+                {isPayLaterProfile
+                  ? (netBalance > 0 ? `Advance ৳${Math.abs(netBalance).toLocaleString()}` : netBalance < 0 ? `Total Loan ৳${Math.abs(netBalance).toLocaleString()}` : 'Settled')
+                  : (netBalance > 0 ? `Loan Receivable ৳${Math.abs(netBalance).toLocaleString()}` : netBalance < 0 ? `Loan Payable ৳${Math.abs(netBalance).toLocaleString()}` : 'Settled')
+                }
               </span>
             </div>
           </motion.div>
 
           <motion.div variants={itemVariants} className="px-6 pb-6">
             <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-3">Actions</h3>
-            <div className="grid grid-cols-2 gap-3">
-              <button onClick={() => handleActionClick('LEND')} disabled={!canLend} className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-2 hover:bg-slate-50 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-sm">
-                <ArrowUpRight className="h-6 w-6 text-red-500" />
-                <span className="text-sm font-semibold text-slate-700">Give Loan</span>
-              </button>
-              
-              <button onClick={() => handleActionClick('BORROW')} disabled={!canBorrow} className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-2 hover:bg-slate-50 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-sm">
-                <ArrowDownRight className="h-6 w-6 text-green-500" />
-                <span className="text-sm font-semibold text-slate-700">Take Loan</span>
-              </button>
-              
-              <button onClick={() => handleActionClick('LEND_REPAYMENT')} disabled={!canReceiveInstallment} className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-2 hover:bg-slate-50 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-sm">
-                <HandCoins className="h-6 w-6 text-green-500" />
-                <span className="text-sm font-semibold text-slate-700 text-center">Receive Installment</span>
-              </button>
-              
-              <button onClick={() => handleActionClick('BORROW_REPAYMENT')} disabled={!canPayInstallment} className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-2 hover:bg-slate-50 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-sm">
-                <Wallet className="h-6 w-6 text-red-500" />
-                <span className="text-sm font-semibold text-slate-700 text-center">Pay Installment / Buy Asset</span>
-              </button>
-            </div>
+            {isPayLaterProfile ? (
+              <div className="grid grid-cols-2 gap-3">
+                <button onClick={() => handleActionClick('CREDIT_EXPENSE')} className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-2 hover:bg-slate-50 active:scale-95 transition-all shadow-sm">
+                  <ShoppingBag className="h-6 w-6 text-blue-500" />
+                  <span className="text-sm font-semibold text-slate-700">Add Credit Purchase</span>
+                </button>
+                <button onClick={() => handleActionClick('CREDIT_REPAYMENT')} disabled={netBalance >= 0} className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-2 hover:bg-slate-50 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-sm">
+                  <Wallet className="h-6 w-6 text-red-500" />
+                  <span className="text-sm font-semibold text-slate-700">Pay Due</span>
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                <button onClick={() => handleActionClick('LEND')} disabled={!canLend} className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-2 hover:bg-slate-50 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-sm">
+                  <ArrowUpRight className="h-6 w-6 text-red-500" />
+                  <span className="text-sm font-semibold text-slate-700">Give Loan</span>
+                </button>
+                
+                <button onClick={() => handleActionClick('BORROW')} disabled={!canBorrow} className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-2 hover:bg-slate-50 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-sm">
+                  <ArrowDownRight className="h-6 w-6 text-green-500" />
+                  <span className="text-sm font-semibold text-slate-700">Take Loan</span>
+                </button>
+                
+                <button onClick={() => handleActionClick('LEND_REPAYMENT')} disabled={!canReceiveInstallment} className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-2 hover:bg-slate-50 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-sm">
+                  <HandCoins className="h-6 w-6 text-green-500" />
+                  <span className="text-sm font-semibold text-slate-700 text-center">Receive Installment</span>
+                </button>
+                
+                <button onClick={() => handleActionClick('BORROW_REPAYMENT')} disabled={!canPayInstallment} className="p-4 bg-white border border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-2 hover:bg-slate-50 active:scale-95 disabled:opacity-40 disabled:pointer-events-none transition-all shadow-sm">
+                  <Wallet className="h-6 w-6 text-red-500" />
+                  <span className="text-sm font-semibold text-slate-700 text-center">Pay Installment / Buy Asset</span>
+                </button>
+              </div>
+            )}
           </motion.div>
 
           <motion.div variants={itemVariants} className="px-6 pb-24">
@@ -823,6 +934,7 @@ export default function PersonLedgerPage() {
                 paginatedTransactions.map((tx) => {
                   const isExpanded = expandedTxId === tx.id;
                   const isAsset = tx.type === 'ASSET_PURCHASE';
+                  const isCreditPurchase = tx.type === 'CREDIT_EXPENSE';
                   
                   let cleanRemarks = tx.description 
                     ? tx.description.replace('(Edited)', '').replace(/^Funded Asset:\s*/i, '').trim() 
@@ -833,30 +945,26 @@ export default function PersonLedgerPage() {
                     <motion.div 
                       key={tx.id} 
                       variants={itemVariants}
-                      className={`bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-300 ${isAsset ? 'border-blue-100' : 'border-slate-100'}`}
+                      className={`bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-300 ${isAsset || isCreditPurchase ? 'border-blue-100' : 'border-slate-100'}`}
                     >
                       <div className="flex items-start justify-between p-4 cursor-pointer hover:bg-slate-50 transition-colors" onClick={() => setExpandedTxId(isExpanded ? null : tx.id)}>
                         <div className="flex items-start gap-3 flex-1 min-w-0 pr-4">
                           <div className={`h-10 w-10 mt-0.5 rounded-full flex items-center justify-center border shrink-0 transition-colors ${
-                            isAsset ? 'bg-blue-50 border-blue-100' :
-                            ['LEND', 'BORROW_REPAYMENT'].includes(tx.type) ? 'bg-red-50 border-red-100' : 'bg-green-50 border-green-100'
+                            isAsset || isCreditPurchase ? 'bg-blue-50 border-blue-100' :
+                            ['LEND', 'BORROW_REPAYMENT', 'CREDIT_REPAYMENT'].includes(tx.type) ? 'bg-red-50 border-red-100' : 'bg-green-50 border-green-100'
                           }`}>
                             {tx.type === 'LEND' && <ArrowUpRight className="h-5 w-5 text-red-600" />}
                             {tx.type === 'BORROW' && <ArrowDownRight className="h-5 w-5 text-green-600" />}
                             {tx.type === 'LEND_REPAYMENT' && <HandCoins className="h-5 w-5 text-green-600" />}
-                            {tx.type === 'BORROW_REPAYMENT' && <Wallet className="h-5 w-5 text-red-600" />}
-                            {tx.type === 'ASSET_PURCHASE' && <ShoppingBag className="h-5 w-5 text-blue-600" />}
+                            {['BORROW_REPAYMENT', 'CREDIT_REPAYMENT'].includes(tx.type) && <Wallet className="h-5 w-5 text-red-600" />}
+                            {['ASSET_PURCHASE', 'CREDIT_EXPENSE'].includes(tx.type) && <ShoppingBag className="h-5 w-5 text-blue-600" />}
                           </div>
                           <div className="flex flex-col flex-1 min-w-0">
-                            <div className="flex items-center gap-1">
-                              <p className="font-semibold text-slate-900 leading-tight truncate">
-                                {tx.type === 'LEND' && 'Loan Given'}
-                                {tx.type === 'BORROW' && 'Loan Taken'}
-                                {tx.type === 'LEND_REPAYMENT' && 'Received Installment'}
-                                {tx.type === 'BORROW_REPAYMENT' && 'Paid Installment'}
-                                {tx.type === 'ASSET_PURCHASE' && 'Asset Purchase'}
+                            <div className="flex items-start gap-1 pr-2">
+                              <p className="font-semibold text-slate-900 leading-tight break-words whitespace-normal">
+                                {tx.displayType}
                               </p>
-                              <ChevronDown className={`h-4 w-4 shrink-0 text-slate-400 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`} />
+                              <ChevronDown className={`h-4 w-4 shrink-0 mt-0.5 text-slate-400 transition-transform duration-300 ${isExpanded ? 'rotate-180' : ''}`} />
                             </div>
                             <p className="text-[11px] text-slate-500 mt-0.5 truncate">{formatDate(tx.date)} • {tx.transaction_method || '-'}</p>
                             
@@ -869,8 +977,8 @@ export default function PersonLedgerPage() {
                         </div>
                         
                         <div className="text-right flex flex-col items-end shrink-0">
-                          <p className={`font-bold ${isAsset ? 'text-blue-600' : ['LEND', 'BORROW_REPAYMENT'].includes(tx.type) ? 'text-red-600' : 'text-green-600'}`}>
-                            {isAsset ? '' : ['LEND', 'BORROW_REPAYMENT'].includes(tx.type) ? '-' : '+'}৳{Number(tx.amount).toLocaleString()}
+                          <p className={`font-bold ${isAsset || isCreditPurchase ? 'text-blue-600' : ['LEND', 'BORROW_REPAYMENT', 'CREDIT_REPAYMENT'].includes(tx.type) ? 'text-red-600' : 'text-green-600'}`}>
+                            {isAsset || isCreditPurchase ? '' : ['LEND', 'BORROW_REPAYMENT', 'CREDIT_REPAYMENT'].includes(tx.type) ? '-' : '+'}৳{Number(tx.amount).toLocaleString()}
                           </p>
                           
                           {/* Hide 'Funded by Loan' if unexpanded */}
@@ -1006,8 +1114,8 @@ export default function PersonLedgerPage() {
                         )}
                       </div>
 
-                      {/* CONDITIONAL ASSET PURCHASE FIELDS */}
-                      {repayMode === 'ASSET' && (
+                      {/* CONDITIONAL ASSET PURCHASE FIELDS / CREDIT PROFILE DROPDOWN */}
+                      {(repayMode === 'ASSET' || txType === 'CREDIT_EXPENSE') && (
                         <AnimatePresence>
                           <motion.div 
                             initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
@@ -1037,9 +1145,12 @@ export default function PersonLedgerPage() {
                         </AnimatePresence>
                       )}
 
-                      <div className="relative z-[80] focus-within:z-[999] hover:z-[999]">
-                        <CustomDropdown label="Payment Method" options={methods} value={method} onChange={setMethod} onAdd={handleAddMethod} addLabel="Add new method" />
-                      </div>
+                      {/* ONLY Show Payment Method if it's NOT a Credit Expense */}
+                      {txType !== 'CREDIT_EXPENSE' && (
+                        <div className="relative z-[80] focus-within:z-[999] hover:z-[999]">
+                          <CustomDropdown label="Payment Method" options={activeMethods} value={method} onChange={setMethod} onAdd={handleAddMethod} addLabel="Add new method" />
+                        </div>
+                      )}
 
                       <div className="relative z-[70]">
                         <label className="block text-sm font-medium text-slate-700 mb-1.5">Date</label>
@@ -1069,8 +1180,8 @@ export default function PersonLedgerPage() {
                     <div className="pt-4 mt-auto shrink-0 bg-white border-t border-slate-100">
                       <button 
                         type="submit" 
-                        disabled={isSaving || !amount || !method || isAmountExceeded || (repayMode === 'ASSET' && !profileId) || (repayMode === 'ASSET' && profileId === 'NONE' && !oneTimeName.trim())} 
-                        className={`w-full h-14 text-white rounded-xl font-medium flex items-center justify-center disabled:opacity-50 transition-colors ${repayMode === 'ASSET' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-600 hover:bg-blue-700'}`}
+                        disabled={isSaving || !amount || (txType !== 'CREDIT_EXPENSE' && !method) || isAmountExceeded || ((repayMode === 'ASSET' || txType === 'CREDIT_EXPENSE') && profileId === 'NONE' && !oneTimeName.trim())} 
+                        className={`w-full h-14 text-white rounded-xl font-medium flex items-center justify-center disabled:opacity-50 transition-colors ${repayMode === 'ASSET' || txType === 'CREDIT_EXPENSE' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-600 hover:bg-blue-700'}`}
                       >
                         {isSaving ? 'Processing...' : editingTxId ? 'Update Record' : 'Confirm Action'}
                       </button>
@@ -1117,7 +1228,6 @@ export default function PersonLedgerPage() {
                 <td className="border border-slate-300 px-4 py-3 whitespace-nowrap">{row.transaction_method || '-'}</td>
                 <td className="border border-slate-300 px-4 py-3 text-green-700 font-medium whitespace-nowrap">{row.taken}</td>
                 <td className="border border-slate-300 px-4 py-3 text-red-700 font-medium whitespace-nowrap">{row.given}</td>
-                {/* Numeric Balance specifically formatted per prompt request */}
                 <td className="border border-slate-300 px-4 py-3 font-bold whitespace-nowrap">
                   {formatNumericBalance(row.runningBalanceAmt)}
                 </td>
@@ -1131,11 +1241,11 @@ export default function PersonLedgerPage() {
           <div className="min-w-[450px] bg-slate-50 border border-slate-200 rounded-lg p-5 shadow-sm">
             <div className="flex justify-between mb-3 text-sm text-slate-600">
               <span>Overall Taken (মোট গ্রহণ):</span>
-              <span className="font-bold text-slate-900 text-base">৳{totalTaken.toLocaleString()}</span>
+              <span className="font-bold text-slate-900 text-base">৳{showTaken.toLocaleString()}</span>
             </div>
             <div className="flex justify-between mb-4 text-sm text-slate-600">
               <span>Overall Given (মোট প্রদান):</span>
-              <span className="font-bold text-slate-900 text-base">৳{totalGiven.toLocaleString()}</span>
+              <span className="font-bold text-slate-900 text-base">৳{showGiven.toLocaleString()}</span>
             </div>
             <div className="flex justify-between border-t border-slate-300 pt-4 text-base">
               <span className="font-semibold text-slate-900">Adjusted Balance (সমন্বয়কৃত জের):</span>

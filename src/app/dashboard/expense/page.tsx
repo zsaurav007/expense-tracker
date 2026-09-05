@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
-import { Plus, ArrowUpRight, FolderOpen, ChevronRight, Wallet, Edit, Trash2, X, SlidersHorizontal } from 'lucide-react';
+import { Plus, ArrowUpRight, FolderOpen, ChevronRight, Wallet, Edit, Trash2, X, SlidersHorizontal, ShoppingBag } from 'lucide-react';
 import CustomDropdown from '@/components/CustomDropdown';
 import { TopControls, PaginationControls } from '@/components/ListControls';
 
@@ -32,6 +32,7 @@ interface Transaction {
 interface ProfileOption {
   label: string;
   value: string;
+  type?: string;
 }
 
 interface FundingSource {
@@ -121,8 +122,9 @@ export default function ExpensePage() {
   const filterOptions = [
     { label: 'All Types', value: 'ALL' },
     { label: 'General Expenses', value: 'EXPENSE' },
+    { label: 'Credit Purchases', value: 'CREDIT_EXPENSE' },
     { label: 'Loans Given', value: 'LEND' },
-    { label: 'Installments Paid', value: 'BORROW_REPAYMENT' },
+    { label: 'Installments/Dues Paid', value: 'BORROW_REPAYMENT' }, // CREDIT_REPAYMENT implicitly grouped here if we expand options later
   ];
 
   const sortOptions = [
@@ -142,12 +144,14 @@ export default function ExpensePage() {
   // --- MODAL & FORM STATE ---
   const [showModal, setShowModal] = useState(false);
   const [editingTxId, setEditingTxId] = useState<string | null>(null);
+  const [expenseMode, setExpenseMode] = useState<'DIRECT' | 'CREDIT'>('DIRECT');
   const [amount, setAmount] = useState('');
   
   const todayDate = getLocalToday();
   const [date, setDate] = useState(todayDate);
   
   const [profileId, setProfileId] = useState('');
+  const [creditPersonId, setCreditPersonId] = useState(''); // Used for Pay Later profiles
   const [oneTimeName, setOneTimeName] = useState(''); 
   const [method, setMethod] = useState('');
   const [description, setDescription] = useState('');
@@ -163,7 +167,8 @@ export default function ExpensePage() {
     setIsLoading(true);
     try {
       const [txRes, profRes, peopleRes] = await Promise.all([
-        fetch('/api/transactions?type=EXPENSE,LEND,BORROW,BORROW_REPAYMENT,LEND_REPAYMENT'),
+        // Added CREDIT_EXPENSE and CREDIT_REPAYMENT to the fetch list
+        fetch('/api/transactions?type=EXPENSE,LEND,BORROW,BORROW_REPAYMENT,LEND_REPAYMENT,CREDIT_EXPENSE,CREDIT_REPAYMENT'),
         fetch('/api/expense-profiles'),
         fetch('/api/people')
       ]);
@@ -173,8 +178,10 @@ export default function ExpensePage() {
         const data = await txRes.json();
         allTxs = data.transactions || [];
         
-        // PERFECT FIX: We only visually display money going OUT (Expense, Give Loan, Pay Installment).
-        const visibleTxs = allTxs.filter(tx => ['EXPENSE', 'LEND', 'BORROW_REPAYMENT'].includes(tx.type));
+        // Show Expenses, Loans Given, Installment Paybacks, AND Credit Expenses + Repayments
+        const visibleTxs = allTxs.filter(tx => 
+          ['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'CREDIT_EXPENSE', 'CREDIT_REPAYMENT'].includes(tx.type)
+        );
         setTransactions(visibleTxs);
       }
       
@@ -186,7 +193,7 @@ export default function ExpensePage() {
       if (peopleRes.ok) {
         const data = await peopleRes.json();
         const rawPeople = data.people || [];
-        setPeopleOptions(rawPeople.map((p: any) => ({ label: p.name, value: p.id })));
+        setPeopleOptions(rawPeople.map((p: any) => ({ label: p.name, value: p.id, type: p.profile_type })));
 
         // Calculate precise unspent loan limit per person using ALL transactions
         const limits: Record<string, number> = {};
@@ -266,7 +273,6 @@ export default function ExpensePage() {
   const updateFundingSource = (id: string, field: 'personId' | 'amount', value: string) => {
     setFundingSources(prev => prev.map(f => {
       if (f.id === id) {
-        // If the person is changed, reset the amount to 0/empty to prevent accidental over-drafting
         if (field === 'personId' && f.personId !== value) {
           return { ...f, personId: value, amount: '' };
         }
@@ -289,6 +295,8 @@ export default function ExpensePage() {
 
   const resetForm = () => {
     setEditingTxId(null);
+    setExpenseMode('DIRECT');
+    setCreditPersonId('');
     setAmount('');
     setMethod('');
     setDescription('');
@@ -305,20 +313,28 @@ export default function ExpensePage() {
     
     setEditingTxId(tx.id);
     setAmount(tx.amount.toString());
-    setMethod(tx.transaction_method);
     setDate(tx.date);
     setDescription(tx.description || '');
     setProfileId(tx.expense_profile_id || 'NONE');
-    setOneTimeName(!tx.expense_profile_id && tx.type === 'EXPENSE' ? tx.source_or_method : '');
+    setOneTimeName(!tx.expense_profile_id && ['EXPENSE', 'CREDIT_EXPENSE'].includes(tx.type) ? tx.source_or_method : '');
     
-    if (tx.transaction_fundings && tx.transaction_fundings.length > 0) {
-      setFundingSources(tx.transaction_fundings.map(f => ({
-        id: Math.random().toString(36).substring(2, 9),
-        personId: f.person_id,
-        amount: f.amount.toString()
-      })));
-    } else {
+    if (tx.type === 'CREDIT_EXPENSE') {
+      setExpenseMode('CREDIT');
+      setCreditPersonId(tx.person_id || '');
+      setMethod('On Credit');
       setFundingSources([]);
+    } else {
+      setExpenseMode('DIRECT');
+      setMethod(tx.transaction_method);
+      if (tx.transaction_fundings && tx.transaction_fundings.length > 0) {
+        setFundingSources(tx.transaction_fundings.map(f => ({
+          id: Math.random().toString(36).substring(2, 9),
+          personId: f.person_id,
+          amount: f.amount.toString()
+        })));
+      } else {
+        setFundingSources([]);
+      }
     }
 
     setShowModal(true);
@@ -344,29 +360,36 @@ export default function ExpensePage() {
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isOverFunded) {
-      alert("The total funded amount cannot exceed the total expense amount!");
-      return;
-    }
-    if (hasExceededPersonLimit) {
-      alert("One or more funding amounts exceed the selected person's available unspent loan balance!");
+    
+    if (expenseMode === 'DIRECT') {
+      if (isOverFunded) {
+        alert("The total funded amount cannot exceed the total expense amount!");
+        return;
+      }
+      if (hasExceededPersonLimit) {
+        alert("One or more funding amounts exceed the selected person's available unspent loan balance!");
+        return;
+      }
+    } else if (expenseMode === 'CREDIT' && !creditPersonId) {
+      alert("Please select a Pay Later account.");
       return;
     }
 
     setIsSaving(true);
     
-    const validFundings = fundingSources
+    const validFundings = expenseMode === 'CREDIT' ? [] : fundingSources
       .filter(f => f.personId && f.amount && parseFloat(f.amount) > 0)
       .map(f => ({ personId: f.personId, amount: parseFloat(f.amount) }));
 
     const payload = {
-      type: 'EXPENSE', 
+      type: expenseMode === 'CREDIT' ? 'CREDIT_EXPENSE' : 'EXPENSE', 
       amount: parseFloat(amount), 
-      method, 
+      method: expenseMode === 'CREDIT' ? 'On Credit' : method, 
       date, 
       description,
       source: profileId === 'NONE' ? (oneTimeName.trim() || 'General Expense') : expenseProfiles.find(p => p.value === profileId)?.label,
       profileId: profileId !== 'NONE' ? profileId : null,
+      personId: expenseMode === 'CREDIT' ? creditPersonId : null,
       fundingSources: validFundings
     };
     
@@ -401,6 +424,7 @@ export default function ExpensePage() {
   };
 
   const profileOptions = [{ label: 'No Profile (One-time)', value: 'NONE' }, ...expenseProfiles];
+  const payLaterOptions = useMemo(() => peopleOptions.filter(p => p.type === 'PAY_LATER'), [peopleOptions]);
 
   // --- DATA PROCESSING (Search, Filter, Sort, Date, Pagination) ---
   const processedTransactions = useMemo(() => {
@@ -444,7 +468,12 @@ export default function ExpensePage() {
     return result;
   }, [transactions, searchTerm, filterType, sortOrder, dateFilter, customStartDate, customEndDate]);
 
-  const totalFilteredAmount = processedTransactions.reduce((sum, tx) => sum + Number(tx.amount), 0);
+  // We only sum transactions that actually deduct cash out of pocket!
+  // CREDIT_EXPENSE does not remove cash right now, so it is ignored.
+  const totalFilteredAmount = processedTransactions.reduce((sum, tx) => {
+    if (tx.type === 'CREDIT_EXPENSE') return sum; 
+    return sum + Number(tx.amount);
+  }, 0);
 
   const totalPages = Math.ceil(processedTransactions.length / itemsPerPage) || 1;
   const paginatedTransactions = processedTransactions.slice(
@@ -482,7 +511,7 @@ export default function ExpensePage() {
       {/* DYNAMIC TOTAL SUMMARY BOX */}
       <motion.div variants={itemVariants} initial="hidden" animate="show" className="px-6 pt-6 relative z-10">
         <div className="bg-red-50 border border-red-100 p-4 rounded-2xl flex flex-col justify-center shadow-sm">
-          <span className="text-xs text-red-700 font-medium mb-1">Total Expense (Filtered)</span>
+          <span className="text-xs text-red-700 font-medium mb-1">Total Cash Expense (Filtered)</span>
           <span className="text-2xl font-bold text-red-700">৳{totalFilteredAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
         </div>
       </motion.div>
@@ -558,6 +587,8 @@ export default function ExpensePage() {
          paginatedTransactions.map((tx) => {
          
          let Icon = ArrowUpRight;
+         let colorClass = 'text-red-600';
+         let bgClass = 'bg-red-50 border-red-100';
          let displayName = tx.expense_profiles?.name || tx.source_or_method;
          let subText = tx.description ? `${tx.description} • ${tx.transaction_method}` : tx.transaction_method;
 
@@ -567,6 +598,15 @@ export default function ExpensePage() {
          } else if (tx.type === 'BORROW_REPAYMENT') {
            Icon = Wallet;
            displayName = `Installment Paid to ${tx.people_profiles?.name || tx.source_or_method}`;
+         } else if (tx.type === 'CREDIT_EXPENSE') {
+           Icon = ShoppingBag;
+           colorClass = 'text-blue-600';
+           bgClass = 'bg-blue-50 border-blue-100';
+           displayName = `${tx.expense_profiles?.name || tx.source_or_method} (Credit)`;
+           subText = `From: ${tx.people_profiles?.name || 'Unknown Shop'} • ${subText}`;
+         } else if (tx.type === 'CREDIT_REPAYMENT') {
+           Icon = Wallet;
+           displayName = `Due Paid to ${tx.people_profiles?.name || tx.source_or_method}`;
          }
          
          const isFunded = tx.transaction_fundings && tx.transaction_fundings.length > 0;
@@ -583,8 +623,8 @@ export default function ExpensePage() {
          const CardContent = (
            <div className="flex items-center justify-between p-4 bg-white rounded-xl border border-slate-100 shadow-sm active:bg-slate-50 transition-colors gap-4 group">
              <div className="flex items-center gap-3 flex-1 min-w-0">
-               <div className="h-10 w-10 bg-red-50 rounded-full flex items-center justify-center border border-red-100 shrink-0 relative">
-                 <Icon className="h-5 w-5 text-red-600" />
+               <div className={`h-10 w-10 rounded-full flex items-center justify-center border shrink-0 relative ${bgClass}`}>
+                 <Icon className={`h-5 w-5 ${colorClass}`} />
                  {isFunded && <div className="absolute -top-1 -right-1 h-3 w-3 bg-blue-500 border-2 border-white rounded-full"></div>}
                </div>
                <div className="flex-1 min-w-0">
@@ -601,10 +641,17 @@ export default function ExpensePage() {
                </div>
              </div>
              
-             <div className="flex flex-col items-end gap-2 shrink-0">
-               <p className="font-bold text-red-600 whitespace-nowrap">-৳{Number(tx.amount).toLocaleString()}</p>
+             <div className="flex flex-col items-end gap-1.5 shrink-0 text-right">
+               <p className={`font-bold whitespace-nowrap ${colorClass}`}>-৳{Number(tx.amount).toLocaleString()}</p>
                
-               {tx.type === 'EXPENSE' && (
+               {/* Visually indicate that Credit Expenses aren't in the total */}
+               {tx.type === 'CREDIT_EXPENSE' && (
+                 <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+                   (Not in Total)
+                 </p>
+               )}
+
+               {['EXPENSE', 'CREDIT_EXPENSE'].includes(tx.type) && (
                  <div className="flex items-center gap-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
                    <button onClick={(e) => handleEditClick(tx, e)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors">
                      <Edit className="h-4 w-4" />
@@ -618,9 +665,9 @@ export default function ExpensePage() {
            </div>
          );
 
-         if (tx.type === 'EXPENSE' && tx.expense_profile_id) {
+         if (['EXPENSE', 'CREDIT_EXPENSE'].includes(tx.type) && tx.expense_profile_id) {
            return <motion.div key={tx.id} variants={itemVariants}><Link href={`/dashboard/expense/profiles/${tx.expense_profile_id}`} className="block">{CardContent}</Link></motion.div>;
-         } else if (['LEND', 'BORROW_REPAYMENT'].includes(tx.type) && tx.person_id) {
+         } else if (['LEND', 'BORROW_REPAYMENT', 'CREDIT_REPAYMENT'].includes(tx.type) && tx.person_id) {
            return <motion.div key={tx.id} variants={itemVariants}><Link href={`/dashboard/ledger/${tx.person_id}`} className="block">{CardContent}</Link></motion.div>;
          } else {
            return <motion.div key={tx.id} variants={itemVariants}>{CardContent}</motion.div>;
@@ -675,18 +722,37 @@ export default function ExpensePage() {
                 <form onSubmit={handleSave} className="flex flex-col flex-1 overflow-hidden">
                   <div className="space-y-4 overflow-y-auto px-1 pb-48 flex-1 overscroll-contain [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                     
-                    <div>
+                    {/* DUAL ACTION TOGGLE FOR EXPENSE TYPE */}
+                    <div className="flex gap-2 mb-2 bg-slate-100 p-1.5 rounded-xl shrink-0 relative z-[100]">
+                      <button 
+                        type="button"
+                        onClick={() => setExpenseMode('DIRECT')} 
+                        className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all ${expenseMode === 'DIRECT' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                      >
+                        Direct Expense
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => setExpenseMode('CREDIT')} 
+                        className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all ${expenseMode === 'CREDIT' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                      >
+                        Pay Later (Credit)
+                      </button>
+                    </div>
+
+                    <div className="relative z-[95]">
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Amount (৳)</label>
                       <input 
                         type="number" required min="0" step="0.01" 
                         value={amount} onChange={(e) => setAmount(e.target.value)} 
-                        className={`w-full h-14 px-4 text-xl font-bold rounded-xl border focus:outline-none focus:ring-2 transition-all bg-white text-slate-900 placeholder:text-slate-400 ${isOverFunded ? 'border-red-500 focus:ring-red-500' : 'border-slate-200 focus:ring-blue-500'}`}
+                        className={`w-full h-14 px-4 text-xl font-bold rounded-xl border focus:outline-none focus:ring-2 transition-all bg-white text-slate-900 placeholder:text-slate-400 ${isOverFunded && expenseMode === 'DIRECT' ? 'border-red-500 focus:ring-red-500' : 'border-slate-200 focus:ring-blue-500'}`}
                         placeholder="0.00" 
                       />
-                      {isOverFunded && <p className="text-xs text-red-500 mt-1.5 font-medium">Funded amount exceeds expense total!</p>}
+                      {isOverFunded && expenseMode === 'DIRECT' && <p className="text-xs text-red-500 mt-1.5 font-medium">Funded amount exceeds expense total!</p>}
                     </div>
                     
-                    <div className="relative z-50">
+                    {/* FIXED Z-INDEX CLIPPING HERE */}
+                    <div className="relative z-[90] focus-within:z-[999] hover:z-[999]">
                       <CustomDropdown label="Asset Category / Profile" options={profileOptions} value={profileId} onChange={setProfileId} onAdd={handleAddProfile} addLabel="Create category" />
                     </div>
 
@@ -696,7 +762,7 @@ export default function ExpensePage() {
                           initial={{ opacity: 0, height: 0, marginTop: 0 }} 
                           animate={{ opacity: 1, height: 'auto', marginTop: 16 }} 
                           exit={{ opacity: 0, height: 0, marginTop: 0 }} 
-                          className="overflow-hidden relative z-40"
+                          className="overflow-hidden relative z-[85]"
                         >
                           <label className="block text-sm font-medium text-slate-700 mb-1.5">Asset Name (One-time)</label>
                           <input 
@@ -709,11 +775,13 @@ export default function ExpensePage() {
                       )}
                     </AnimatePresence>
                     
-                    <div className="relative z-30">
-                      <CustomDropdown label="Payment Method" options={methods} value={method} onChange={setMethod} onAdd={handleAddMethod} addLabel="Add new method" />
-                    </div>
+                    {expenseMode === 'DIRECT' && (
+                      <div className="relative z-[80] focus-within:z-[999] hover:z-[999]">
+                        <CustomDropdown label="Payment Method" options={methods} value={method} onChange={setMethod} onAdd={handleAddMethod} addLabel="Add new method" />
+                      </div>
+                    )}
                     
-                    <div className="relative z-20">
+                    <div className="relative z-[70]">
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Date</label>
                       <input 
                         type="date" required max={todayDate}
@@ -722,7 +790,7 @@ export default function ExpensePage() {
                       />
                     </div>
                     
-                    <div className="relative z-10">
+                    <div className="relative z-[60]">
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Description (Optional)</label>
                       <input 
                         type="text" 
@@ -732,69 +800,90 @@ export default function ExpensePage() {
                       />
                     </div>
 
-                    <div className="pt-6 mt-4 border-t border-slate-100">
-                      <div className="flex justify-between items-center mb-4">
-                        <div>
-                          <label className="block text-sm font-medium text-slate-900">Funded By (Optional)</label>
-                          <p className="text-[10px] text-slate-500 mt-0.5">Split expense across loans you've taken</p>
-                        </div>
-                        <button 
-                          type="button" 
-                          onClick={addFundingSource} 
-                          disabled={hasEmptySource}
-                          className={`text-xs font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-colors ${hasEmptySource ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`}
-                        >
-                          <Plus className="h-3.5 w-3.5"/> Add Source
-                        </button>
+                    {expenseMode === 'CREDIT' ? (
+                      <div className="pt-6 mt-4 border-t border-slate-100 relative z-[50] focus-within:z-[999] hover:z-[999]">
+                        <label className="block text-sm font-medium text-slate-700 mb-1.5">Select Pay Later Account</label>
+                        <CustomDropdown 
+                          label="" 
+                          options={payLaterOptions} 
+                          value={creditPersonId} 
+                          onChange={setCreditPersonId} 
+                          showSearch={true} 
+                        />
+                        {payLaterOptions.length === 0 && (
+                          <p className="text-xs text-orange-500 mt-2 font-medium">No Pay Later accounts found. Please create one in the Ledger Hub.</p>
+                        )}
                       </div>
-
-                      {fundingSources.map((source) => {
-                        const availablePeople = peopleOptions.filter(p => 
-                          p.value === source.personId || !fundingSources.some(f => f.personId === p.value)
-                        );
-
-                        const maxLimitForPerson = source.personId ? (personMaxLimits[source.personId] ?? 0) : null;
-                        const isThisExceeded = maxLimitForPerson !== null && parseFloat(source.amount || '0') > maxLimitForPerson;
-
-                        return (
-                          <div key={source.id} className="mb-3">
-                            <div className="flex gap-2">
-                              <div className="flex-1">
-                                <CustomDropdown 
-                                  options={availablePeople} 
-                                  value={source.personId} 
-                                  onChange={(val) => updateFundingSource(source.id, 'personId', val)} 
-                                  label="" 
-                                />
-                              </div>
-                              <div className="w-1/3 shrink-0">
-                                <input 
-                                  type="number" min="0" step="0.01" required placeholder="Amount"
-                                  max={maxLimitForPerson !== null ? maxLimitForPerson : undefined}
-                                  value={source.amount} onChange={(e) => updateFundingSource(source.id, 'amount', e.target.value)} 
-                                  className={`w-full h-14 px-3 text-sm rounded-xl border bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 transition-all ${isThisExceeded ? 'border-red-500 focus:ring-red-500' : 'border-slate-200 focus:ring-blue-500'}`}
-                                />
-                              </div>
-                              <button type="button" onClick={() => removeFundingSource(source.id)} className="h-14 w-10 flex items-center justify-center text-slate-400 hover:text-red-500 bg-slate-50 rounded-xl shrink-0 transition-colors">
-                                <X className="h-5 w-5"/>
-                              </button>
-                            </div>
-                            {maxLimitForPerson !== null && (
-                              <p className={`text-[11px] mt-1 font-medium ${isThisExceeded ? 'text-red-500' : 'text-slate-500'}`}>
-                                {isThisExceeded ? `Exceeds max available: ৳${maxLimitForPerson.toLocaleString()}` : `Max available: ৳${maxLimitForPerson.toLocaleString()}`}
-                              </p>
-                            )}
+                    ) : (
+                      <div className="pt-6 mt-4 border-t border-slate-100 relative z-[50]">
+                        <div className="flex justify-between items-center mb-4">
+                          <div>
+                            <label className="block text-sm font-medium text-slate-900">Funded By (Optional)</label>
+                            <p className="text-[10px] text-slate-500 mt-0.5">Split expense across loans you've taken</p>
                           </div>
-                        );
-                      })}
-                    </div>
+                          <button 
+                            type="button" 
+                            onClick={addFundingSource} 
+                            disabled={hasEmptySource}
+                            className={`text-xs font-bold px-2.5 py-1.5 rounded-lg flex items-center gap-1 transition-colors ${hasEmptySource ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`}
+                          >
+                            <Plus className="h-3.5 w-3.5"/> Add Source
+                          </button>
+                        </div>
 
+                        {fundingSources.map((source, index) => {
+                          const availablePeople = peopleOptions.filter(p => 
+                            p.value === source.personId || !fundingSources.some(f => f.personId === p.value)
+                          );
+
+                          const maxLimitForPerson = source.personId ? (personMaxLimits[source.personId] ?? 0) : null;
+                          const isThisExceeded = maxLimitForPerson !== null && parseFloat(source.amount || '0') > maxLimitForPerson;
+
+                          return (
+                            <div key={source.id} className="mb-3 relative focus-within:z-[999] hover:z-[999]" style={{ zIndex: 40 - index }}>
+                              <div className="flex gap-2">
+                                <div className="flex-1">
+                                  <CustomDropdown 
+                                    options={availablePeople} 
+                                    value={source.personId} 
+                                    onChange={(val) => updateFundingSource(source.id, 'personId', val)} 
+                                    label="" 
+                                  />
+                                </div>
+                                <div className="w-1/3 shrink-0">
+                                  <input 
+                                    type="number" min="0" step="0.01" required placeholder="Amount"
+                                    max={maxLimitForPerson !== null ? maxLimitForPerson : undefined}
+                                    value={source.amount} onChange={(e) => updateFundingSource(source.id, 'amount', e.target.value)} 
+                                    className={`w-full h-14 px-3 text-sm rounded-xl border bg-white text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 transition-all ${isThisExceeded ? 'border-red-500 focus:ring-red-500' : 'border-slate-200 focus:ring-blue-500'}`}
+                                  />
+                                </div>
+                                <button type="button" onClick={() => removeFundingSource(source.id)} className="h-14 w-10 flex items-center justify-center text-slate-400 hover:text-red-500 bg-slate-50 rounded-xl shrink-0 transition-colors">
+                                  <X className="h-5 w-5"/>
+                                </button>
+                              </div>
+                              {maxLimitForPerson !== null && (
+                                <p className={`text-[11px] mt-1 font-medium ${isThisExceeded ? 'text-red-500' : 'text-slate-500'}`}>
+                                  {isThisExceeded ? `Exceeds max available: ৳${maxLimitForPerson.toLocaleString()}` : `Max available: ৳${maxLimitForPerson.toLocaleString()}`}
+                                </p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
 
-                  <div className="pt-4 mt-auto shrink-0 bg-white border-t border-slate-100">
+                  <div className="pt-4 mt-auto shrink-0 bg-white border-t border-slate-100 relative z-0">
                     <button 
                       type="submit" 
-                      disabled={isSaving || !profileId || !method || (profileId === 'NONE' && !oneTimeName.trim()) || isOverFunded || hasExceededPersonLimit || hasEmptySource} 
+                      disabled={
+                        isSaving || 
+                        !amount || 
+                        (profileId === 'NONE' && !oneTimeName.trim()) || 
+                        (expenseMode === 'DIRECT' && (!method || isOverFunded || hasExceededPersonLimit || hasEmptySource)) ||
+                        (expenseMode === 'CREDIT' && !creditPersonId)
+                      } 
                       className="w-full h-14 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 disabled:opacity-50 transition-colors"
                     >
                       {isSaving ? 'Processing...' : editingTxId ? 'Update Record' : 'Save Expense'}

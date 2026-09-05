@@ -20,17 +20,17 @@ export async function GET(
 
     const supabase = getServiceSupabase();
     
-    // 1. Fetch Person Details
+    // 1. Fetch Person Details (Now including profile_type)
     const { data: person, error: personError } = await supabase
       .from('people_profiles')
-      .select('id, name, phone')
+      .select('id, name, phone, profile_type')
       .eq('id', id)
       .eq('user_id', session.userId)
       .single();
 
     if (personError) return NextResponse.json({ error: 'Person not found' }, { status: 404 });
 
-    // 2. Fetch Direct Transactions (Loans & Repayments)
+    // 2. Fetch Direct Transactions (Loans, Repayments, Credit Expenses)
     const { data: directTransactions, error: txError } = await supabase
       .from('transactions')
       .select('*')
@@ -98,8 +98,12 @@ export async function GET(
       const amt = Number(t.amount);
       if (t.type === 'LEND') netBalance += amt;
       if (t.type === 'LEND_REPAYMENT') netBalance -= amt;
-      if (t.type === 'BORROW') netBalance -= amt;
-      if (t.type === 'BORROW_REPAYMENT') netBalance += amt;
+      
+      // Treat BORROW and CREDIT_EXPENSE both as accumulating debt (you owe them)
+      if (t.type === 'BORROW' || t.type === 'CREDIT_EXPENSE') netBalance -= amt;
+      
+      // Treat BORROW_REPAYMENT and CREDIT_REPAYMENT both as reducing debt
+      if (t.type === 'BORROW_REPAYMENT' || t.type === 'CREDIT_REPAYMENT') netBalance += amt;
     });
 
     return NextResponse.json({ person, transactions: allTransactions, netBalance });

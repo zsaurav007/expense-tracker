@@ -14,6 +14,9 @@ type Person = {
   phone?: string;
   netBalance: number;
   created_at?: string; // Added to safely support date filtering
+  profile_type?: 'LEND_BORROW' | 'PAY_LATER';
+  total_loan?: number; // Prepped for backend API update
+  total_paid?: number; // Prepped for backend API update
 };
 
 // --- UTILITIES ---
@@ -55,9 +58,13 @@ export default function LedgerHubPage() {
   const [people, setPeople] = useState<Person[]>([]);
   const [newPersonName, setNewPersonName] = useState('');
   const [newPersonPhone, setNewPersonPhone] = useState('');
+  const [newProfileType, setNewProfileType] = useState<'LEND_BORROW' | 'PAY_LATER'>('LEND_BORROW');
   const [isAdding, setIsAdding] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
+
+  // --- TAB STATE ---
+  const [activeTab, setActiveTab] = useState<'LEND_BORROW' | 'PAY_LATER'>('LEND_BORROW');
 
   // --- LIST CONTROLS STATE (Search, Filter, Sort, Date, Pagination) ---
   const [showFilters, setShowFilters] = useState(false);
@@ -74,8 +81,8 @@ export default function LedgerHubPage() {
 
   const filterOptions = [
     { label: 'All Accounts', value: 'ALL' },
-    { label: 'Owe To Me', value: 'OWES_ME' },
-    { label: 'I Owe', value: 'I_OWE' },
+    { label: 'Loan Receivable', value: 'OWES_ME' },
+    { label: 'Loan Payable', value: 'I_OWE' },
     { label: 'Settled Up', value: 'SETTLED' },
   ];
 
@@ -124,7 +131,11 @@ export default function LedgerHubPage() {
     setIsAdding(true);
     const res = await fetch('/api/people', {
       method: 'POST',
-      body: JSON.stringify({ name: newPersonName.trim(), phone: newPersonPhone.trim() }),
+      body: JSON.stringify({ 
+        name: newPersonName.trim(), 
+        phone: newPersonPhone.trim(),
+        profile_type: newProfileType
+      }),
     });
 
     if (res.ok) {
@@ -132,6 +143,7 @@ export default function LedgerHubPage() {
       setPeople([data.person, ...people]);
       setNewPersonName('');
       setNewPersonPhone('');
+      setNewProfileType('LEND_BORROW');
       closeModal();
     }
     setIsAdding(false);
@@ -204,15 +216,20 @@ export default function LedgerHubPage() {
     setModalError('');
     setNewPersonName('');
     setNewPersonPhone('');
+    setNewProfileType('LEND_BORROW');
   };
 
-  // Keep totals calculated against the original, full list
-  const totalOwesMe = people.filter(p => p.netBalance > 0).reduce((sum, p) => sum + p.netBalance, 0);
-  const totalIOwe = people.filter(p => p.netBalance < 0).reduce((sum, p) => sum + Math.abs(p.netBalance), 0);
+  // Filter people strictly by the active tab
+  const currentTabPeople = people.filter(p => (p.profile_type || 'LEND_BORROW') === activeTab);
+  
+  // Totals for top cards
+  const totalOwesMe = currentTabPeople.filter(p => p.netBalance > 0).reduce((sum, p) => sum + p.netBalance, 0);
+  const totalIOwe = currentTabPeople.filter(p => p.netBalance < 0).reduce((sum, p) => sum + Math.abs(p.netBalance), 0);
+  const totalPayLaterLoan = currentTabPeople.reduce((sum, p) => sum + (p.total_loan || 0), 0);
 
   // --- DATA PROCESSING (Search, Filter, Sort, Pagination) ---
   const processedPeople = useMemo(() => {
-    let result = [...people];
+    let result = [...currentTabPeople];
 
     // 1. Date Filter (based on account creation date if available)
     if (dateFilter === 'custom') {
@@ -247,7 +264,7 @@ export default function LedgerHubPage() {
     });
 
     return result;
-  }, [people, searchTerm, filterType, sortOrder, dateFilter, customStartDate, customEndDate]);
+  }, [currentTabPeople, searchTerm, filterType, sortOrder, dateFilter, customStartDate, customEndDate]);
 
   const totalPages = Math.ceil(processedPeople.length / itemsPerPage) || 1;
   const paginatedPeople = processedPeople.slice(
@@ -262,7 +279,7 @@ export default function LedgerHubPage() {
         animate={{ y: 0, opacity: 1 }}
         className="px-6 pt-8 pb-4 bg-white border-b border-slate-100 sticky top-0 z-40 flex justify-between items-center"
       >
-        <h1 className="text-xl font-bold text-slate-900">Lend & Borrow</h1>
+        <h1 className="text-xl font-bold text-slate-900">Ledger Hub</h1>
         <div className="flex gap-2">
           {/* FILTER TOGGLE BUTTON */}
           <button 
@@ -347,16 +364,39 @@ export default function LedgerHubPage() {
         animate="show"
         className="flex-1 relative z-0"
       >
+        {/* TAB TOGGLE PILL SLIDER */}
+        <motion.div variants={itemVariants} className="px-6 mt-6 mb-2">
+          <div className="flex bg-slate-200/60 p-1.5 rounded-xl">
+            <button
+              onClick={() => { setActiveTab('LEND_BORROW'); setCurrentPage(1); setFilterType('ALL'); }}
+              className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${activeTab === 'LEND_BORROW' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              Lend & Borrow
+            </button>
+            <button
+              onClick={() => { setActiveTab('PAY_LATER'); setCurrentPage(1); setFilterType('ALL'); }}
+              className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${activeTab === 'PAY_LATER' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+            >
+              Pay Later (Credit)
+            </button>
+          </div>
+        </motion.div>
+
         <motion.div variants={itemVariants} className="p-6 grid grid-cols-2 gap-4">
           <div 
             onClick={() => { 
+              if (activeTab === 'PAY_LATER') return;
               setFilterType(filterType === 'OWES_ME' ? 'ALL' : 'OWES_ME'); 
               setCurrentPage(1); 
             }}
-            className={`bg-green-50 border p-4 rounded-2xl flex flex-col justify-center shadow-sm cursor-pointer hover:shadow-md transition-all active:scale-95 ${filterType === 'OWES_ME' ? 'border-green-400 ring-2 ring-green-200' : 'border-green-100 hover:border-green-300'}`}
+            className={`bg-green-50 border p-4 rounded-2xl flex flex-col justify-center shadow-sm transition-all ${activeTab !== 'PAY_LATER' ? 'cursor-pointer hover:shadow-md active:scale-95' : ''} ${filterType === 'OWES_ME' ? 'border-green-400 ring-2 ring-green-200' : 'border-green-100 hover:border-green-300'}`}
           >
-            <span className="text-xs text-green-700 font-medium mb-1">Loan Receivable</span>
-            <span className="text-lg font-bold text-green-700">৳{totalOwesMe.toLocaleString()}</span>
+            <span className="text-xs text-green-700 font-medium mb-1">
+              {activeTab === 'PAY_LATER' ? 'Total Loan' : 'Loan Receivable'}
+            </span>
+            <span className="text-lg font-bold text-green-700">
+              ৳{activeTab === 'PAY_LATER' ? totalPayLaterLoan.toLocaleString() : totalOwesMe.toLocaleString()}
+            </span>
           </div>
           <div 
             onClick={() => { 
@@ -412,6 +452,12 @@ export default function LedgerHubPage() {
                         {person.netBalance > 0 && <p className="text-sm font-bold text-green-600">Loan Receivable ৳{person.netBalance.toLocaleString()}</p>}
                         {person.netBalance < 0 && <p className="text-sm font-bold text-red-600">Loan Payable ৳{Math.abs(person.netBalance).toLocaleString()}</p>}
                         {person.netBalance === 0 && <p className="text-sm font-bold text-slate-400">Settled up</p>}
+                        
+                        {/* New Info visible without opening the cards */}
+                        <div className="flex gap-3 mt-1.5 text-[10px] text-slate-400 font-medium tracking-wide">
+                          <span>Total Loan: ৳{person.total_loan?.toLocaleString() || 0}</span>
+                          <span>Paid/Recv: ৳{person.total_paid?.toLocaleString() || 0}</span>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -479,16 +525,35 @@ export default function LedgerHubPage() {
                   <form onSubmit={handleAddPerson} className="space-y-4">
                     <div className="flex justify-between items-start mb-4">
                       <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-                        <UserPlus className="h-5 w-5 text-blue-600" /> Add New Person
+                        <UserPlus className="h-5 w-5 text-blue-600" /> Add New Account
                       </h3>
                       <button type="button" onClick={closeModal} className="p-2 -mr-2 -mt-2 text-slate-400 hover:bg-slate-100 rounded-full transition-colors">
                         <X className="h-5 w-5" />
                       </button>
                     </div>
+
+                    {/* DUAL ACTION TOGGLE FOR PROFILE TYPE */}
+                    <div className="flex gap-2 mb-4 bg-slate-100 p-1.5 rounded-xl shrink-0">
+                      <button 
+                        type="button"
+                        onClick={() => setNewProfileType('LEND_BORROW')} 
+                        className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all ${newProfileType === 'LEND_BORROW' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                      >
+                        Lend / Borrow
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => setNewProfileType('PAY_LATER')} 
+                        className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all ${newProfileType === 'PAY_LATER' ? 'bg-white shadow-sm text-blue-600' : 'text-slate-500 hover:text-slate-700'}`}
+                      >
+                        Pay Later (Shop)
+                      </button>
+                    </div>
+
                     <input
                       type="text" required value={newPersonName} onChange={(e) => setNewPersonName(e.target.value)}
                       className="w-full h-14 px-4 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-slate-900 placeholder:text-slate-400"
-                      placeholder="Name *"
+                      placeholder="Account Name *"
                     />
                     <input
                       type="tel" value={newPersonPhone} onChange={(e) => setNewPersonPhone(e.target.value)}

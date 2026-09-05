@@ -61,9 +61,10 @@ export async function POST(request: Request) {
     const body = await request.json();
     const supabase = getServiceSupabase();
 
+    // Dynamically handles standard types AND our new CREDIT_EXPENSE / CREDIT_REPAYMENT
     const { data: newTx, error: txError } = await supabase.from('transactions').insert([{
       user_id: session.userId,
-      type: body.type,
+      type: body.type, 
       amount: Number(body.amount),
       source_or_method: body.source || 'Ledger', 
       transaction_method: body.method,
@@ -87,6 +88,7 @@ export async function POST(request: Request) {
       const { error: fundingError } = await supabase.from('transaction_fundings').insert(fundingsPayload);
       
       if (fundingError) {
+        // Rollback transaction if split funding fails
         await supabase.from('transactions').delete().eq('id', newTx.id);
         console.error("FUNDING SPLIT ERROR:", fundingError.message);
         return NextResponse.json({ error: `Database Permission Error: ${fundingError.message}` }, { status: 500 });
