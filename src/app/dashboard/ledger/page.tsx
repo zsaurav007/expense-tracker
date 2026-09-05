@@ -405,7 +405,9 @@ export default function LedgerHubPage() {
             }}
             className={`bg-red-50 border p-4 rounded-2xl flex flex-col justify-center shadow-sm cursor-pointer hover:shadow-md transition-all active:scale-95 ${filterType === 'I_OWE' ? 'border-red-400 ring-2 ring-red-200' : 'border-red-100 hover:border-red-300'}`}
           >
-            <span className="text-xs text-red-700 font-medium mb-1">Credit Payable</span>
+            <span className="text-xs text-red-700 font-medium mb-1">
+              {activeTab === 'PAY_LATER' ? 'Credit Payable' : 'Loan Payable'}
+            </span>
             <span className="text-lg font-bold text-red-700">৳{totalIOwe.toLocaleString()}</span>
           </div>
         </motion.div>
@@ -453,10 +455,17 @@ export default function LedgerHubPage() {
                         {person.netBalance < 0 && <p className="text-sm font-bold text-red-600">{activeTab === 'PAY_LATER' ? 'Credit Payable' : 'Loan Payable'} ৳{Math.abs(person.netBalance).toLocaleString()}</p>}
                         {person.netBalance === 0 && <p className="text-sm font-bold text-slate-400">Settled up</p>}
                         
-                        {/* CHANGED: Conditionally render Paid vs Paid/Recv based on activeTab */}
                         <div className="flex gap-3 mt-1.5 text-[10px] text-slate-400 font-medium tracking-wide">
                           <span>{activeTab === 'PAY_LATER' ? 'Total Credit' : 'Total Loan'}: ৳{person.total_loan?.toLocaleString() || 0}</span>
-                          <span>{activeTab === 'PAY_LATER' ? 'Paid' : 'Paid/Recv'}: ৳{person.total_paid?.toLocaleString() || 0}</span>
+                          {/* CHANGED: Dynamic label for Paid/Recv based on netBalance in LEND_BORROW tab */}
+                          <span>
+                            {activeTab === 'PAY_LATER' 
+                              ? 'Paid' 
+                              : (person.netBalance < 0 
+                                  ? 'Paid' 
+                                  : (person.netBalance > 0 ? 'Recv' : 'Paid/Recv'))
+                            }: ৳{person.total_paid?.toLocaleString() || 0}
+                          </span>
                         </div>
                       </div>
                     </div>
