@@ -472,8 +472,8 @@ export default function PersonLedgerPage() {
     setIsSaving(false);
   };
 
-  // Dynamically prepare clean payment methods (removes 'On Credit' for repayment)
-  const activeMethods = txType === 'CREDIT_REPAYMENT' ? methods.filter(m => m.value !== 'On Credit') : methods;
+  // Dynamically prepare clean payment methods (removes 'On Credit' for all manual dropdowns here)
+  const activeMethods = methods.filter(m => m.value !== 'On Credit');
 
   // --- DATA CALCULATION FOR UI & REPORTS ---
   let runningBalance = 0;
@@ -919,7 +919,7 @@ export default function PersonLedgerPage() {
 
           <motion.div variants={itemVariants} className="px-6 pb-24">
             <div className="flex justify-between items-center mb-4">
-              <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider">Ledger History</h3>
+              <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-0">Ledger History</h3>
               {filterType !== 'ALL' && (
                 <button onClick={() => { setFilterType('ALL'); setCurrentPage(1); }} className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded-md hover:bg-blue-100 transition-colors">
                   Clear Filter
