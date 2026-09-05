@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Image from 'next/image';
 import Link from 'next/link';
-import { LogIn, User, Lock, UserPlus, Clock, MessageCircle, Mail, UserCircle } from 'lucide-react';
+import { LogIn, User, Lock, UserPlus, Clock, MessageCircle, Mail, UserCircle, XCircle } from 'lucide-react';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 
 // --- Animation Variants ---
@@ -159,9 +159,9 @@ export default function Home() {
                 <AnimatePresence>
                   {error && (
                     <motion.div 
-                      initial={{ opacity: 0, height: 0, mb: 0 }} 
-                      animate={{ opacity: 1, height: 'auto', mb: 20 }} 
-                      exit={{ opacity: 0, height: 0, mb: 0 }}
+                      initial={{ opacity: 0, height: 0, marginBottom: 0 }} 
+                      animate={{ opacity: 1, height: 'auto', marginBottom: 20 }} 
+                      exit={{ opacity: 0, height: 0, marginBottom: 0 }}
                       className="overflow-hidden"
                     >
                       <div className="p-4 text-sm text-red-600 bg-red-50/80 rounded-2xl border border-red-100 font-semibold flex items-center gap-2">
