@@ -136,6 +136,9 @@ export default function DashboardClient({
   
   let totalCreditPurchased = 0;
   let totalCreditRepaid = 0;
+  
+  let totalBorrowTaken = 0;
+  let totalBorrowRepaid = 0;
 
   const peopleBalances: Record<string, { id: string, name: string, balance: number }> = {};
 
@@ -143,13 +146,12 @@ export default function DashboardClient({
     const amt = Number(tx.amount);
     
     // 1. Calculate Main Wallet Balance
-    // NOTE: CREDIT_EXPENSE does not deduct money. CREDIT_REPAYMENT DOES deduct money.
     if (['INCOME', 'BORROW', 'LEND_REPAYMENT'].includes(tx.type)) totalBalance += amt;
     if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_REPAYMENT'].includes(tx.type)) totalBalance -= amt;
 
     // 2. Calculate Active Debt for Unspent Loan Math (Standard Loans)
-    if (tx.type === 'BORROW') currentDebt += amt;
-    if (tx.type === 'BORROW_REPAYMENT') currentDebt -= amt;
+    if (tx.type === 'BORROW') { currentDebt += amt; totalBorrowTaken += amt; }
+    if (tx.type === 'BORROW_REPAYMENT') { currentDebt -= amt; totalBorrowRepaid += amt; }
 
     // 3. Calculate Pay Later / Credit Math
     if (tx.type === 'CREDIT_EXPENSE') totalCreditPurchased += amt;
@@ -174,6 +176,7 @@ export default function DashboardClient({
 
   const unspentLoanMoney = Math.max(0, currentDebt - totalLoanFundedAssets);
   const unpaidCreditDue = Math.max(0, totalCreditPurchased - totalCreditRepaid);
+  const unpaidLoanDue = Math.max(0, totalBorrowTaken - totalBorrowRepaid);
   const ownMoney = totalBalance - unspentLoanMoney;
 
   const owesYou = Object.values(peopleBalances).filter(p => p.balance > 0);
@@ -203,7 +206,6 @@ export default function DashboardClient({
   chartTxs.forEach((tx) => {
     const amt = Number(tx.amount);
     if (['INCOME', 'BORROW', 'LEND_REPAYMENT'].includes(tx.type)) filteredIncome += amt;
-    // We visually count standard expenses and asset purchases for chart tracking
     if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_REPAYMENT'].includes(tx.type)) filteredExpense += amt;
   });
 
@@ -380,18 +382,22 @@ export default function DashboardClient({
             </h2>
           </div>
 
-          <div className="grid grid-cols-3 gap-2 border-t border-slate-100 pt-5">
+          <div className="grid grid-cols-4 gap-1 border-t border-slate-100 pt-5">
             <div className="text-center">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Own Money</p>
-              <p className="text-lg font-bold text-blue-600">৳{ownMoney.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Own Money</p>
+              <p className="text-sm font-bold text-blue-600">৳{ownMoney.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
             </div>
             <div className="text-center border-l border-slate-100">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Unspent Loan</p>
-              <p className="text-lg font-bold text-orange-500">৳{unspentLoanMoney.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Unspent Loan</p>
+              <p className="text-sm font-bold text-orange-500">৳{unspentLoanMoney.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
             </div>
             <div className="text-center border-l border-slate-100">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Unpaid Credit</p>
-              <p className="text-lg font-bold text-red-500">৳{unpaidCreditDue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Unpaid Loan</p>
+              <p className="text-sm font-bold text-purple-600">৳{unpaidLoanDue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
+            </div>
+            <div className="text-center border-l border-slate-100">
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Unpaid Credit</p>
+              <p className="text-sm font-bold text-red-500">৳{unpaidCreditDue.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</p>
             </div>
           </div>
         </motion.section>
