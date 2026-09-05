@@ -5,14 +5,17 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { 
-  UserPlus, Users, LogOut, Key, Shield, UserCircle, 
-  Activity, Clock, ChevronRight, ShieldCheck, X, Edit, Trash2 
+  UserPlus, Users, LogOut, Key, Shield, Activity, Clock, 
+  ChevronRight, ShieldCheck, X, Edit, Trash2, CheckCircle2, XCircle, Mail, Phone, Calendar, Loader2 
 } from 'lucide-react';
 
 type AppUser = {
   id: string;
   full_name: string;
   username: string;
+  email?: string;
+  phone?: string;
+  status?: string;
   created_at: string;
 };
 
@@ -29,12 +32,18 @@ const itemVariants: Variants = {
 export default function MasterDashboard() {
   const router = useRouter();
   const [masterUserId, setMasterUserId] = useState<string | null>(null);
-  const [appUsers, setAppUsers] = useState<AppUser[]>([]);
+  
+  // Segregated User Lists
+  const [activeUsers, setActiveUsers] = useState<AppUser[]>([]);
+  const [pendingUsers, setPendingUsers] = useState<AppUser[]>([]);
   
   // Create Form state
   const [fullName, setFullName] = useState('');
   const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
+  const [usernameStatus, setUsernameStatus] = useState<'idle' | 'checking' | 'available' | 'taken'>('idle');
   
   // UI state
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -42,6 +51,9 @@ export default function MasterDashboard() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   
+  // Moderation state
+  const [processingId, setProcessingId] = useState<string | null>(null);
+
   // God Mode state
   const [activeGodModeId, setActiveGodModeId] = useState<string | null>(null);
 
@@ -55,6 +67,9 @@ export default function MasterDashboard() {
   // Edit User Modal State
   const [editModalUser, setEditModalUser] = useState<AppUser | null>(null);
   const [editFullName, setEditFullName] = useState('');
+  const [editUsername, setEditUsername] = useState('');
+  const [editEmail, setEditEmail] = useState('');
+  const [editPhone, setEditPhone] = useState('');
   const [isEditing, setIsEditing] = useState(false);
   const [editError, setEditError] = useState('');
   const [editSuccess, setEditSuccess] = useState('');
@@ -84,19 +99,86 @@ export default function MasterDashboard() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
+  // Debounced Username Check for Provisioning
+  useEffect(() => {
+    const checkUsername = async () => {
+      const currentUsername = username.trim();
+      if (!currentUsername) {
+        setUsernameStatus('idle');
+        return;
+      }
+
+      setUsernameStatus('checking');
+
+      try {
+        const res = await fetch(`/api/auth/check-username?username=${encodeURIComponent(currentUsername)}`);
+        if (res.ok) {
+          const data = await res.json();
+          setUsernameStatus(data.available ? 'available' : 'taken');
+        } else {
+          setUsernameStatus('idle');
+        }
+      } catch (err) {
+        setUsernameStatus('idle');
+      }
+    };
+
+    const timeoutId = setTimeout(() => {
+      checkUsername();
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [username]);
+
   const fetchUsers = async () => {
     const { data, error } = await supabase
       .from('app_users')
-      .select('id, full_name, username, created_at')
+      .select('id, full_name, username, email, phone, status, created_at')
       .order('created_at', { ascending: false });
 
     if (!error && data) {
-      setAppUsers(data as AppUser[]);
+      const users = data as AppUser[];
+      // If status is NOT exactly 'ACTIVE' (catches 'PENDING' and NULL legacy accounts), put them in Pending Queue
+      setPendingUsers(users.filter(u => u.status !== 'ACTIVE'));
+      
+      // Only strictly ACTIVE users go to the active directory
+      setActiveUsers(users.filter(u => u.status === 'ACTIVE'));
+    }
+  };
+
+  const handleModerate = async (userId: string, action: 'ACCEPT' | 'REJECT') => {
+    if (action === 'REJECT' && !window.confirm("Are you sure you want to reject and delete this application?")) {
+      return;
+    }
+
+    setProcessingId(userId);
+
+    try {
+      const res = await fetch('/api/admin/moderate-user', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId, action }),
+      });
+
+      if (res.ok) {
+        fetchUsers();
+      } else {
+        alert("Failed to process the action. Please try again.");
+      }
+    } catch (error) {
+      alert("A network error occurred.");
+    } finally {
+      setProcessingId(null);
     }
   };
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (usernameStatus === 'taken') {
+      setError('Please choose a different username before submitting.');
+      return;
+    }
+    
     setIsSubmitting(true);
     setError('');
     setSuccess('');
@@ -105,7 +187,14 @@ export default function MasterDashboard() {
       const res = await fetch('/api/users/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ fullName, username, password, masterUserId }),
+        body: JSON.stringify({ 
+          fullName, 
+          username, 
+          email, 
+          phone, 
+          password, 
+          masterUserId 
+        }),
       });
 
       const data = await res.json();
@@ -114,7 +203,10 @@ export default function MasterDashboard() {
       setSuccess(`User @${data.user.username} created successfully.`);
       setFullName('');
       setUsername('');
+      setEmail('');
+      setPhone('');
       setPassword('');
+      setUsernameStatus('idle');
       fetchUsers();
     } catch (err: unknown) {
       if (err instanceof Error) {
@@ -180,13 +272,19 @@ export default function MasterDashboard() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.access_token}`
         },
-        body: JSON.stringify({ userId: editModalUser.id, fullName: editFullName }),
+        body: JSON.stringify({ 
+          userId: editModalUser.id, 
+          fullName: editFullName,
+          username: editUsername,
+          email: editEmail,
+          phone: editPhone
+        }),
       });
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to update user');
 
-      setEditSuccess(`User full name updated successfully.`);
+      setEditSuccess(`User profile updated successfully.`);
       fetchUsers();
       setTimeout(() => {
         setEditModalUser(null);
@@ -277,7 +375,7 @@ export default function MasterDashboard() {
     );
   }
 
-  const newUsersThisWeek = appUsers.filter(u => {
+  const newUsersThisWeek = activeUsers.filter(u => {
     const oneWeekAgo = new Date();
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
     return new Date(u.created_at) >= oneWeekAgo;
@@ -321,7 +419,7 @@ export default function MasterDashboard() {
           <div className="bg-white p-5 border border-slate-200 rounded-lg shadow-sm flex items-center justify-between">
             <div>
               <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Total Active Users</p>
-              <h3 className="text-2xl md:text-3xl font-extrabold text-slate-900">{appUsers.length}</h3>
+              <h3 className="text-2xl md:text-3xl font-extrabold text-slate-900">{activeUsers.length}</h3>
             </div>
             <div className="h-10 w-10 md:h-12 md:w-12 bg-indigo-50 rounded-md flex items-center justify-center text-indigo-600">
               <Users className="h-5 w-5 md:h-6 md:w-6" />
@@ -349,7 +447,89 @@ export default function MasterDashboard() {
           </div>
         </motion.div>
 
-        {/* Main Content Grid */}
+        {/* --- PENDING APPROVALS QUEUE --- */}
+        {pendingUsers.length > 0 && (
+          <motion.section variants={itemVariants} className="bg-white rounded-lg shadow-sm border border-orange-200 overflow-hidden flex flex-col">
+            <div className="p-4 md:p-6 border-b border-orange-100 flex justify-between items-center bg-orange-50/50">
+              <div>
+                <h2 className="text-lg font-bold text-orange-800">Pending Approvals</h2>
+                <p className="text-sm text-orange-600/80 mt-1">Review and manage new user registrations.</p>
+              </div>
+              <div className="bg-orange-100 text-orange-700 px-3 py-1.5 rounded-lg text-sm font-bold flex items-center gap-2">
+                <Clock className="h-4 w-4" />
+                {pendingUsers.length} Pending
+              </div>
+            </div>
+            
+            <div className="p-4 md:p-6 space-y-4 bg-slate-50/30">
+              <AnimatePresence>
+                {pendingUsers.map((user) => (
+                  <motion.div 
+                    key={user.id}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, x: -50, scale: 0.95 }}
+                    className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm relative overflow-hidden"
+                  >
+                    {processingId === user.id && (
+                      <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-10 flex items-center justify-center">
+                        <Loader2 className="h-8 w-8 text-indigo-600 animate-spin" />
+                      </div>
+                    )}
+
+                    <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                      <div className="flex-1 space-y-3">
+                        <div className="flex items-center gap-3">
+                          <div className="h-12 w-12 bg-slate-100 rounded-full flex items-center justify-center text-lg font-bold text-slate-700">
+                            {user.full_name.charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <h3 className="text-lg font-bold text-slate-900">{user.full_name}</h3>
+                            <p className="text-sm font-medium text-indigo-600">@{user.username}</p>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-2">
+                          <div className="flex items-center gap-2 text-sm text-slate-600 bg-slate-50 px-3 py-2 rounded-lg">
+                            <Mail className="h-4 w-4 text-slate-400 shrink-0" />
+                            <span className="truncate">{user.email}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-sm text-slate-600 bg-slate-50 px-3 py-2 rounded-lg">
+                            <Phone className="h-4 w-4 text-slate-400 shrink-0" />
+                            <span>{user.phone || 'No phone provided'}</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-sm text-slate-600 bg-slate-50 px-3 py-2 rounded-lg sm:col-span-2">
+                            <Calendar className="h-4 w-4 text-slate-400 shrink-0" />
+                            <span>Applied: {new Date(user.created_at).toLocaleString()}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex md:flex-col gap-3 shrink-0">
+                        <button 
+                          onClick={() => handleModerate(user.id, 'ACCEPT')}
+                          disabled={processingId !== null}
+                          className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 bg-green-50 hover:bg-green-600 text-green-700 hover:text-white font-bold rounded-xl transition-colors disabled:opacity-50"
+                        >
+                          <CheckCircle2 className="h-5 w-5" /> Accept
+                        </button>
+                        <button 
+                          onClick={() => handleModerate(user.id, 'REJECT')}
+                          disabled={processingId !== null}
+                          className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-3 bg-red-50 hover:bg-red-600 text-red-700 hover:text-white font-bold rounded-xl transition-colors disabled:opacity-50"
+                        >
+                          <XCircle className="h-5 w-5" /> Reject
+                        </button>
+                      </div>
+                    </div>
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </div>
+          </motion.section>
+        )}
+
+        {/* Main Content Grid (Create User & Active Directory) */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           
           {/* Create User Form Section */}
@@ -377,13 +557,52 @@ export default function MasterDashboard() {
 
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Unique Username</label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    required
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value.toLowerCase())}
+                    className={`w-full h-10 px-3 pr-10 rounded-md border focus:outline-none focus:ring-2 transition-all text-sm ${
+                      usernameStatus === 'taken' 
+                        ? 'border-red-400 focus:ring-red-500' 
+                        : usernameStatus === 'available' 
+                          ? 'border-green-400 focus:ring-green-500' 
+                          : 'border-slate-300 focus:ring-indigo-500'
+                    }`}
+                    placeholder="e.g. johndoe"
+                  />
+                  <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                    {usernameStatus === 'checking' && <Loader2 className="h-4 w-4 text-indigo-500 animate-spin" />}
+                    {usernameStatus === 'available' && <CheckCircle2 className="h-4 w-4 text-green-500" />}
+                    {usernameStatus === 'taken' && <XCircle className="h-4 w-4 text-red-500" />}
+                  </div>
+                </div>
+                {usernameStatus === 'taken' && (
+                  <p className="text-xs text-red-500 mt-1.5 font-medium">This username is already taken.</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Email Address</label>
                 <input
-                  type="text"
+                  type="email"
                   required
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value.toLowerCase())}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value.toLowerCase())}
                   className="w-full h-10 px-3 rounded-md border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-                  placeholder="e.g. johndoe"
+                  placeholder="e.g. email@example.com"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Phone (Optional)</label>
+                <input
+                  type="tel"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  className="w-full h-10 px-3 rounded-md border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+                  placeholder="e.g. +8801700000000"
                 />
               </div>
 
@@ -401,7 +620,7 @@ export default function MasterDashboard() {
 
               <button
                 type="submit"
-                disabled={isSubmitting}
+                disabled={isSubmitting || usernameStatus === 'checking' || usernameStatus === 'taken'}
                 className="w-full h-10 mt-2 flex justify-center items-center rounded-md bg-indigo-600 text-white font-bold hover:bg-indigo-700 disabled:opacity-50 transition-colors text-sm"
               >
                 {isSubmitting ? 'Provisioning Account...' : 'Provision Account'}
@@ -409,16 +628,17 @@ export default function MasterDashboard() {
             </form>
           </motion.section>
 
-          {/* Existing Users List Section */}
+          {/* ACTIVE Users List Section */}
           <motion.section variants={itemVariants} className="lg:col-span-2 bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden flex flex-col order-1 lg:order-2">
             <div className="p-4 md:p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-50/50 gap-4">
               <div>
-                <h2 className="text-base font-bold text-slate-900">User Directory</h2>
+                <h2 className="text-base font-bold text-slate-900">Active User Directory</h2>
                 <p className="text-xs text-slate-500 mt-1">Manage and access sub-user environments.</p>
               </div>
             </div>
 
-            <div className="overflow-x-auto">
+            {/* --- DESKTOP TABLE VIEW --- */}
+            <div className="hidden md:block overflow-x-auto">
               <div className="overflow-y-auto max-h-[600px] min-w-[600px]">
                 <table className="w-full text-left border-collapse text-sm">
                   <thead className="bg-slate-50 sticky top-0 border-b border-slate-200 z-10">
@@ -429,14 +649,14 @@ export default function MasterDashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {appUsers.length === 0 ? (
+                    {activeUsers.length === 0 ? (
                       <tr>
                         <td colSpan={3} className="px-6 py-12 text-center text-slate-500">
                           No active users in the directory.
                         </td>
                       </tr>
                     ) : (
-                      appUsers.map((user) => (
+                      activeUsers.map((user) => (
                         <tr key={user.id} className="hover:bg-slate-50 transition-colors group">
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-3">
@@ -453,16 +673,18 @@ export default function MasterDashboard() {
                             {new Date(user.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
                           </td>
                           <td className="px-6 py-4">
-                            {/* Actions always visible on mobile, visible on hover on lg */}
                             <div className="flex items-center justify-end gap-2 opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity flex-wrap">
                               <button 
                                 onClick={() => {
                                   setEditModalUser(user);
-                                  setEditFullName(user.full_name);
+                                  setEditFullName(user.full_name || '');
+                                  setEditUsername(user.username || '');
+                                  setEditEmail(user.email || '');
+                                  setEditPhone(user.phone || '');
                                   setEditError('');
                                   setEditSuccess('');
                                 }}
-                                title="Edit Name"
+                                title="Edit Profile"
                                 className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-md border border-slate-200 transition-all flex items-center justify-center"
                               >
                                 <Edit className="h-3.5 w-3.5" />
@@ -506,6 +728,84 @@ export default function MasterDashboard() {
                     )}
                   </tbody>
                 </table>
+              </div>
+            </div>
+
+            {/* --- MOBILE CARD VIEW --- */}
+            <div className="md:hidden flex flex-col bg-slate-50/30">
+              <div className="overflow-y-auto max-h-[600px] p-4 space-y-4">
+                {activeUsers.length === 0 ? (
+                  <div className="text-center text-slate-500 py-8 bg-white rounded-xl border border-slate-200 border-dashed">
+                    No active users in the directory.
+                  </div>
+                ) : (
+                  activeUsers.map((user) => (
+                    <div key={user.id} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-col">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className="h-12 w-12 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-lg uppercase shrink-0 border border-indigo-100">
+                          {user.full_name.charAt(0)}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-slate-900 truncate">{user.full_name}</p>
+                          <p className="text-xs text-slate-500 truncate">@{user.username}</p>
+                          <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider font-semibold">
+                            Joined {new Date(user.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
+                          </p>
+                        </div>
+                      </div>
+                      
+                      <div className="grid grid-cols-3 gap-2 pt-3 border-t border-slate-100">
+                        <button 
+                          onClick={() => {
+                            setEditModalUser(user);
+                            setEditFullName(user.full_name || '');
+                            setEditUsername(user.username || '');
+                            setEditEmail(user.email || '');
+                            setEditPhone(user.phone || '');
+                            setEditError('');
+                            setEditSuccess('');
+                          }}
+                          className="flex flex-col items-center justify-center gap-1 p-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors"
+                        >
+                          <Edit className="h-4 w-4" />
+                          <span className="text-[10px] font-bold uppercase">Edit</span>
+                        </button>
+                        <button 
+                          onClick={() => {
+                            setResetModalUser(user);
+                            setNewResetPassword('');
+                            setResetError('');
+                            setResetSuccess('');
+                          }}
+                          className="flex flex-col items-center justify-center gap-1 p-2 bg-indigo-50 text-indigo-600 rounded-lg hover:bg-indigo-100 transition-colors"
+                        >
+                          <Key className="h-4 w-4" />
+                          <span className="text-[10px] font-bold uppercase">Reset</span>
+                        </button>
+                        <button 
+                          onClick={() => {
+                            setDeleteModalUser(user);
+                            setDeletePassword('');
+                            setDeleteError('');
+                            setDeleteSuccess('');
+                          }}
+                          className="flex flex-col items-center justify-center gap-1 p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          <span className="text-[10px] font-bold uppercase">Delete</span>
+                        </button>
+                        <button 
+                          onClick={() => handleGodMode(user.id)}
+                          disabled={activeGodModeId === user.id}
+                          className="col-span-3 mt-1 flex items-center justify-center gap-2 p-3 bg-slate-900 text-white rounded-lg text-xs font-bold hover:bg-indigo-600 disabled:opacity-50 transition-colors shadow-sm"
+                        >
+                          <Shield className="h-4 w-4" /> 
+                          {activeGodModeId === user.id ? 'Connecting to God Mode...' : 'Enter God Mode'}
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </motion.section>
@@ -567,20 +867,30 @@ export default function MasterDashboard() {
                 </div>
                 <button onClick={() => setEditModalUser(null)} className="p-1.5 text-slate-400 hover:text-slate-600 rounded-md hover:bg-slate-100"><X className="h-4 w-4" /></button>
               </div>
-              <form onSubmit={handleEditUserSubmit} className="space-y-4">
+              <form onSubmit={handleEditUserSubmit} className="space-y-4 max-h-[70vh] overflow-y-auto px-1 pb-1">
                 {editError && <div className="p-3 text-sm text-red-600 bg-red-50 rounded-md border border-red-100 font-medium">{editError}</div>}
                 {editSuccess && <div className="p-3 text-sm text-emerald-700 bg-emerald-50 rounded-md border border-emerald-100 font-medium">{editSuccess}</div>}
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Username (Read-Only)</label>
-                  <input type="text" disabled value={editModalUser.username} className="w-full h-10 px-3 rounded-md border border-slate-200 bg-slate-50 text-slate-500 text-sm cursor-not-allowed" />
-                </div>
+                
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Full Name</label>
                   <input type="text" required value={editFullName} onChange={(e) => setEditFullName(e.target.value)} className="w-full h-10 px-3 rounded-md border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" placeholder="Update full name" />
                 </div>
-                <div className="flex gap-3 pt-2">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Username</label>
+                  <input type="text" required value={editUsername} onChange={(e) => setEditUsername(e.target.value)} className="w-full h-10 px-3 rounded-md border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" placeholder="Update username" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Email Address</label>
+                  <input type="email" required value={editEmail} onChange={(e) => setEditEmail(e.target.value)} className="w-full h-10 px-3 rounded-md border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" placeholder="Update email address" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wide">Phone (Optional)</label>
+                  <input type="tel" value={editPhone} onChange={(e) => setEditPhone(e.target.value)} className="w-full h-10 px-3 rounded-md border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" placeholder="Update phone number" />
+                </div>
+
+                <div className="flex gap-3 pt-4 border-t border-slate-100 mt-4">
                   <button type="button" onClick={() => setEditModalUser(null)} className="flex-1 h-10 rounded-md border border-slate-300 text-slate-700 font-bold hover:bg-slate-50 text-sm">Cancel</button>
-                  <button type="submit" disabled={isEditing || !editFullName} className="flex-1 h-10 rounded-md bg-blue-600 text-white font-bold hover:bg-blue-700 disabled:opacity-50 text-sm">{isEditing ? 'Saving...' : 'Save Changes'}</button>
+                  <button type="submit" disabled={isEditing || !editFullName || !editUsername || !editEmail} className="flex-1 h-10 rounded-md bg-blue-600 text-white font-bold hover:bg-blue-700 disabled:opacity-50 text-sm">{isEditing ? 'Saving...' : 'Save Changes'}</button>
                 </div>
               </form>
             </motion.div>

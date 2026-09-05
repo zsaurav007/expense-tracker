@@ -7,18 +7,18 @@ export default async function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  // Securely check the HTTP-only cookie
+  // Securely check the HTTP-only cookie and database state
   const session = await getSession();
 
   if (!session) {
-    redirect('/'); // Kick back to login if not authenticated
+    redirect('/'); // Kick back to login if not authenticated or suspended
   }
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
       
       {/* Optional: God Mode Warning Banner */}
-      {session.isGodMode && (
+      {session?.isGodMode && (
         <div className="bg-red-600 text-white text-xs font-bold text-center py-1.5 sticky top-0 z-50">
           ⚠️ GOD MODE ACTIVE: You are viewing {session.fullName}'s account
         </div>

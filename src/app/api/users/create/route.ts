@@ -1,10 +1,10 @@
 import { NextResponse } from 'next/server';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import { getServiceSupabase } from '@/lib/supabase';
 
 export async function POST(request: Request) {
   try {
-    const { fullName, username, password, masterUserId } = await request.json();
+    const { fullName, username, email, phone, password, masterUserId } = await request.json();
 
     if (!fullName || !username || !password) {
       return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
@@ -16,6 +16,18 @@ export async function POST(request: Request) {
 
     const supabaseAdmin = getServiceSupabase();
 
+    // Check if username or email already exists to prevent duplicate errors
+    const { data: existingUser } = await supabaseAdmin
+      .from('app_users')
+      .select('username, email')
+      .or(`username.eq.${username},email.eq.${email}`)
+      .single();
+
+    if (existingUser) {
+      if (existingUser.username === username) return NextResponse.json({ error: 'Username is already taken.' }, { status: 400 });
+      if (existingUser.email === email) return NextResponse.json({ error: 'Email is already registered.' }, { status: 400 });
+    }
+
     // Insert into your custom schema
     const { data, error } = await supabaseAdmin
       .from('app_users')
@@ -23,8 +35,11 @@ export async function POST(request: Request) {
         {
           full_name: fullName,
           username: username,
+          email: email || null,
+          phone: phone || null,
           password_hash: passwordHash,
           created_by: masterUserId, // The Supabase Auth ID of the Master User
+          status: 'PENDING' // Ensures users created by the Master Admin still need approval
         },
       ])
       .select('id, full_name, username')
@@ -36,6 +51,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ success: true, user: data });
   } catch (error) {
+    console.error('CREATE USER ERROR:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }

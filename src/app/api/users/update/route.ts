@@ -3,7 +3,8 @@ import { getServiceSupabase } from '@/lib/supabase';
 
 export async function PUT(request: Request) {
   try {
-    const { userId, fullName } = await request.json();
+    // Extract all fields sent by the updated Master Dashboard frontend
+    const { userId, fullName, username, email, phone } = await request.json();
     const authHeader = request.headers.get('Authorization');
 
     if (!authHeader) {
@@ -19,14 +20,33 @@ export async function PUT(request: Request) {
       return NextResponse.json({ error: 'Unauthorized Master User' }, { status: 401 });
     }
 
-    if (!userId || !fullName) {
-      return NextResponse.json({ error: 'User ID and full name are required' }, { status: 400 });
+    if (!userId || !fullName || !username) {
+      return NextResponse.json({ error: 'User ID, full name, and username are required' }, { status: 400 });
     }
 
-    // 2. Update the sub-user's full name in the 'app_users' table
+    // Optional: Check if the new username or email is already taken by a DIFFERENT user
+    const { data: existingUser } = await supabaseAdmin
+      .from('app_users')
+      .select('id, username, email')
+      .or(`username.eq.${username},email.eq.${email}`)
+      .neq('id', userId) // Exclude the current user being updated
+      .limit(1)
+      .single();
+
+    if (existingUser) {
+      if (existingUser.username === username) return NextResponse.json({ error: 'Username is already taken by another user.' }, { status: 400 });
+      if (existingUser.email === email) return NextResponse.json({ error: 'Email is already registered to another user.' }, { status: 400 });
+    }
+
+    // 2. Update all details in the 'app_users' table
     const { error: updateError } = await supabaseAdmin
       .from('app_users')
-      .update({ full_name: fullName })
+      .update({ 
+        full_name: fullName,
+        username: username,
+        email: email || null,
+        phone: phone || null
+      })
       .eq('id', userId);
 
     if (updateError) {
