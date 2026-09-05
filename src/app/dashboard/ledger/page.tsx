@@ -392,7 +392,7 @@ export default function LedgerHubPage() {
             className={`bg-green-50 border p-4 rounded-2xl flex flex-col justify-center shadow-sm transition-all ${activeTab !== 'PAY_LATER' ? 'cursor-pointer hover:shadow-md active:scale-95' : ''} ${filterType === 'OWES_ME' ? 'border-green-400 ring-2 ring-green-200' : 'border-green-100 hover:border-green-300'}`}
           >
             <span className="text-xs text-green-700 font-medium mb-1">
-              {activeTab === 'PAY_LATER' ? 'Total Loan' : 'Loan Receivable'}
+              {activeTab === 'PAY_LATER' ? 'Total Credit' : 'Loan Receivable'}
             </span>
             <span className="text-lg font-bold text-green-700">
               ৳{activeTab === 'PAY_LATER' ? totalPayLaterLoan.toLocaleString() : totalOwesMe.toLocaleString()}
@@ -405,7 +405,7 @@ export default function LedgerHubPage() {
             }}
             className={`bg-red-50 border p-4 rounded-2xl flex flex-col justify-center shadow-sm cursor-pointer hover:shadow-md transition-all active:scale-95 ${filterType === 'I_OWE' ? 'border-red-400 ring-2 ring-red-200' : 'border-red-100 hover:border-red-300'}`}
           >
-            <span className="text-xs text-red-700 font-medium mb-1">Loan Payable</span>
+            <span className="text-xs text-red-700 font-medium mb-1">Credit Payable</span>
             <span className="text-lg font-bold text-red-700">৳{totalIOwe.toLocaleString()}</span>
           </div>
         </motion.div>
@@ -449,14 +449,14 @@ export default function LedgerHubPage() {
                         </p>
                       )}
                       <div className="mt-1">
-                        {person.netBalance > 0 && <p className="text-sm font-bold text-green-600">Loan Receivable ৳{person.netBalance.toLocaleString()}</p>}
-                        {person.netBalance < 0 && <p className="text-sm font-bold text-red-600">Loan Payable ৳{Math.abs(person.netBalance).toLocaleString()}</p>}
+                        {person.netBalance > 0 && <p className="text-sm font-bold text-green-600">{activeTab === 'PAY_LATER' ? 'Credit Receivable' : 'Loan Receivable'} ৳{person.netBalance.toLocaleString()}</p>}
+                        {person.netBalance < 0 && <p className="text-sm font-bold text-red-600">{activeTab === 'PAY_LATER' ? 'Credit Payable' : 'Loan Payable'} ৳{Math.abs(person.netBalance).toLocaleString()}</p>}
                         {person.netBalance === 0 && <p className="text-sm font-bold text-slate-400">Settled up</p>}
                         
-                        {/* New Info visible without opening the cards */}
+                        {/* CHANGED: Conditionally render Paid vs Paid/Recv based on activeTab */}
                         <div className="flex gap-3 mt-1.5 text-[10px] text-slate-400 font-medium tracking-wide">
-                          <span>Total Loan: ৳{person.total_loan?.toLocaleString() || 0}</span>
-                          <span>Paid/Recv: ৳{person.total_paid?.toLocaleString() || 0}</span>
+                          <span>{activeTab === 'PAY_LATER' ? 'Total Credit' : 'Total Loan'}: ৳{person.total_loan?.toLocaleString() || 0}</span>
+                          <span>{activeTab === 'PAY_LATER' ? 'Paid' : 'Paid/Recv'}: ৳{person.total_paid?.toLocaleString() || 0}</span>
                         </div>
                       </div>
                     </div>
