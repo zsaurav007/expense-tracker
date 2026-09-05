@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { decrypt } from '@/lib/auth'; // 1. Import the decrypt function
+import { decrypt } from '@/lib/auth';
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -12,11 +12,19 @@ const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
 
 export async function proxy(request: NextRequest) {
   const path = request.nextUrl.pathname;
-  const isPublicPath = path === '/' || path === '/register';
+
+  // 1. CRITICAL FIX: Bypass middleware entirely for /master routes.
+  // Master uses native Supabase Auth, so we don't want JWT checks interfering.
+  if (path.startsWith('/master')) {
+    return NextResponse.next();
+  }
+  
+  const publicPaths = ['/', '/register'];
+  const isPublicPath = publicPaths.includes(path);
   
   const token = request.cookies.get('auth-token')?.value || request.cookies.get('session')?.value;
 
-  // RULE 1: If NOT logged in and trying to access protected routes -> redirect to login
+  // RULE 1: If NOT logged in and trying to access protected routes -> redirect
   if (!isPublicPath && !token) {
     return NextResponse.redirect(new URL('/', request.url));
   }
@@ -26,14 +34,12 @@ export async function proxy(request: NextRequest) {
   // RULE 2: If logged in, perform a live database check
   if (token) {
     try {
-      // 2. Extract the actual database user ID from the encrypted JWT
       const sessionPayload = await decrypt(token);
 
       if (!sessionPayload || !sessionPayload.userId) {
         throw new Error("Invalid token payload");
       }
 
-      // 3. Query using the REAL user ID, not the JWT string
       const { data: user, error } = await supabaseAdmin
         .from('app_users')
         .select('status')
@@ -46,7 +52,6 @@ export async function proxy(request: NextRequest) {
 
       isValidSession = true;
     } catch (err) {
-      // Fail-safe: if DB check fails or token is bad, force re-login
       const response = NextResponse.redirect(new URL('/', request.url));
       response.cookies.delete('auth-token');
       response.cookies.delete('session');
@@ -54,7 +59,7 @@ export async function proxy(request: NextRequest) {
     }
   }
 
-  // RULE 3: Valid active user trying to access public login/register -> dashboard
+  // RULE 3: Valid active user trying to access public login/register -> redirect to dashboard
   if (isPublicPath && isValidSession) {
     return NextResponse.redirect(new URL('/dashboard', request.url));
   }
@@ -67,6 +72,6 @@ export const config = {
     '/',
     '/register',
     '/dashboard/:path*',
-    '/master/:path*',
+    '/master/:path*', 
   ],
 };

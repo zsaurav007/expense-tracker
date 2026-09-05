@@ -29,9 +29,10 @@ export async function decrypt(input: string | undefined): Promise<any> {
 }
 
 export async function getSession() {
-  // FIXED: await cookies() is required in Next.js 15+
   const cookieStore = await cookies();
-  const session = cookieStore.get('session')?.value;
+  
+  // CRITICAL FIX: Check BOTH 'session' and 'auth-token' to perfectly match proxy.ts
+  const session = cookieStore.get('session')?.value || cookieStore.get('auth-token')?.value;
   
   if (!session) return null;
   
