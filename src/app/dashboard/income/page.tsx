@@ -104,6 +104,10 @@ export default function IncomePage() {
   const [description, setDescription] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
+  // Custom Source Toggle State
+  const [isAddingCustomSource, setIsAddingCustomSource] = useState(false);
+  const [customSourceInput, setCustomSourceInput] = useState('');
+
   const [sources, setSources] = useState([
     { label: 'Salary', value: 'Salary' },
     { label: 'Business', value: 'Business' },
@@ -135,12 +139,21 @@ export default function IncomePage() {
   }, []);
 
   const handleAddSource = (val: string) => {
-    setSources(p => [...p, { label: val, value: val }]);
-    setSource(val);
+    if (!val.trim()) return;
+    const exists = sources.some(s => s.value.toLowerCase() === val.trim().toLowerCase());
+    if (!exists) {
+      setSources(p => [...p, { label: val.trim(), value: val.trim() }]);
+    }
+    setSource(val.trim());
   };
+
   const handleAddMethod = (val: string) => {
-    setMethods(p => [...p, { label: val, value: val }]);
-    setMethod(val);
+    if (!val.trim()) return;
+    const exists = methods.some(m => m.value.toLowerCase() === val.trim().toLowerCase());
+    if (!exists) {
+      setMethods(p => [...p, { label: val.trim(), value: val.trim() }]);
+    }
+    setMethod(val.trim());
   };
 
   const resetForm = () => {
@@ -150,12 +163,22 @@ export default function IncomePage() {
     setMethod('');
     setDate(new Date().toISOString().split('T')[0]);
     setEditingTxId(null);
+    setIsAddingCustomSource(false);
+    setCustomSourceInput('');
   };
 
   const handleEditClick = (tx: Transaction, e: React.MouseEvent) => {
     e.preventDefault(); e.stopPropagation();
     setEditingTxId(tx.id);
     setAmount(tx.amount.toString());
+    
+    if (tx.source_or_method) {
+      const exists = sources.some(s => s.value.toLowerCase() === tx.source_or_method.toLowerCase());
+      if (!exists) {
+        setSources(p => [...p, { label: tx.source_or_method, value: tx.source_or_method }]);
+      }
+    }
+
     setSource(tx.source_or_method);
     setMethod(tx.transaction_method);
     setDate(tx.date);
@@ -205,7 +228,6 @@ export default function IncomePage() {
   const processedTransactions = useMemo(() => {
     let result = [...transactions];
 
-    // 1. Date Filter
     if (dateFilter === 'custom') {
       if (customStartDate) result = result.filter(tx => tx.date.split('T')[0] >= customStartDate);
       if (customEndDate) result = result.filter(tx => tx.date.split('T')[0] <= customEndDate);
@@ -214,12 +236,10 @@ export default function IncomePage() {
       if (startDate) result = result.filter(tx => tx.date.split('T')[0] >= startDate);
     }
 
-    // 2. Type Filter
     if (filterType !== 'ALL') {
       result = result.filter(tx => tx.type === filterType);
     }
 
-    // 3. Search Filter
     if (searchTerm) {
       const lowerTerm = searchTerm.toLowerCase();
       result = result.filter(tx => 
@@ -230,7 +250,6 @@ export default function IncomePage() {
       );
     }
 
-    // 4. Sort
     result.sort((a, b) => {
       if (sortOrder === 'date-desc') return new Date(b.date).getTime() - new Date(a.date).getTime();
       if (sortOrder === 'date-asc') return new Date(a.date).getTime() - new Date(b.date).getTime();
@@ -309,7 +328,6 @@ export default function IncomePage() {
                 dateOptions={dateFilterOptions}
               />
               
-              {/* Custom Date Inputs - Kept completely visible */}
               {dateFilter === 'custom' && (
                 <motion.div 
                   initial={{ opacity: 0, y: -10 }} 
@@ -418,19 +436,18 @@ export default function IncomePage() {
            );
          })}
 
-         {/* REUSABLE PAGINATION CONTROLS */}
-         {!isLoading && (
-           <motion.div variants={itemVariants}>
-             <PaginationControls 
+        {!isLoading && (
+          <motion.div variants={itemVariants}>
+            <PaginationControls 
                 currentPage={currentPage} 
                 totalPages={totalPages} 
                 itemsPerPage={itemsPerPage} 
                 setItemsPerPage={setItemsPerPage} 
                 setCurrentPage={setCurrentPage} 
                 totalItems={processedTransactions.length}
-             />
-           </motion.div>
-         )}
+            />
+          </motion.div>
+        )}
       </motion.div>
 
       {/* --- ANIMATED MODAL --- */}
@@ -475,15 +492,66 @@ export default function IncomePage() {
                       />
                     </div>
                     
-                    <div className="relative z-50">
-                      <CustomDropdown label="Source" options={sources} value={source} onChange={setSource} onAdd={handleAddSource} addLabel="Add source" />
+                    {/* EXPLICIT CUSTOM SOURCE TOGGLE + DROPDOWN */}
+                    <div className="relative z-[90] focus-within:z-[999] hover:z-[999]">
+                      <div className="flex justify-between items-center mb-1.5">
+                        <label className="block text-sm font-medium text-slate-700">Source</label>
+                        <button 
+                          type="button" 
+                          onClick={() => setIsAddingCustomSource(!isAddingCustomSource)}
+                          className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1"
+                        >
+                          <Plus className="h-3.5 w-3.5" /> {isAddingCustomSource ? 'Select from list' : 'Add Custom'}
+                        </button>
+                      </div>
+
+                      {isAddingCustomSource ? (
+                        <div className="flex gap-2">
+                          <input 
+                            type="text" 
+                            value={customSourceInput} 
+                            onChange={(e) => setCustomSourceInput(e.target.value)} 
+                            placeholder="Enter custom source..." 
+                            className="w-full h-14 px-4 text-slate-900 bg-white rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                          <button 
+                            type="button" 
+                            onClick={() => {
+                              if (customSourceInput.trim()) {
+                                handleAddSource(customSourceInput);
+                                setCustomSourceInput('');
+                                setIsAddingCustomSource(false);
+                              }
+                            }}
+                            className="px-4 h-14 bg-blue-600 text-white rounded-xl font-bold shrink-0 hover:bg-blue-700"
+                          >
+                            Add
+                          </button>
+                        </div>
+                      ) : (
+                        <CustomDropdown 
+                          label="" 
+                          options={sources} 
+                          value={source} 
+                          onChange={setSource} 
+                          onAdd={handleAddSource} 
+                          addLabel="Add source" 
+                        />
+                      )}
                     </div>
                     
-                    <div className="relative z-40">
-                      <CustomDropdown label="Method" options={methods} value={method} onChange={setMethod} onAdd={handleAddMethod} addLabel="Add method" />
+                    <div className="relative z-[80] focus-within:z-[999] hover:z-[999]">
+                      <CustomDropdown 
+                        label="Method" 
+                        options={methods} 
+                        value={method} 
+                        onChange={setMethod} 
+                        onAdd={handleAddMethod} 
+                        addLabel="Add method" 
+                      />
                     </div>
                     
-                    <div className="relative z-30">
+                    <div className="relative z-[70]">
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Date</label>
                       <input 
                         type="date" required 
@@ -492,7 +560,7 @@ export default function IncomePage() {
                       />
                     </div>
                     
-                    <div className="relative z-20">
+                    <div className="relative z-[60]">
                       <label className="block text-sm font-medium text-slate-700 mb-1.5">Description (Optional)</label>
                       <input 
                         type="text" 
