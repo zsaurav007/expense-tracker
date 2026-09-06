@@ -12,7 +12,6 @@ export async function GET() {
 
     const supabase = getServiceSupabase();
     
-    // Fetch recent admin messages
     const { data, error } = await supabase
       .from('app_notifications')
       .select('id, title, message, created_at, action_url')
@@ -22,17 +21,10 @@ export async function GET() {
 
     if (error) throw error;
 
-    // Deduplicate by title so we don't show 50 identical rows if sent to 50 users
+    // Deduplicate by title
     const uniqueBroadcasts = Array.from(new Map(data.map(item => [item.title, item])).values());
 
-    return NextResponse.json(
-      { broadcasts: uniqueBroadcasts },
-      {
-        headers: {
-          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
-        },
-      }
-    );
+    return NextResponse.json({ broadcasts: uniqueBroadcasts });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
@@ -45,30 +37,41 @@ export async function POST(request: Request) {
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
     const { targetUserId, title, message, actionUrl } = await request.json();
+    
+    // Admin operations require the Service Role Key to bypass RLS policies
     const supabase = getServiceSupabase();
 
     let usersToNotify: any[] = [];
 
-    // If targetUserId is 'ALL', fetch all active users
     if (targetUserId === 'ALL') {
-      const { data } = await supabase.from('app_users').select('id').eq('status', 'ACTIVE');
+      // FIX: Use .ilike for case-insensitive matching in case DB stores 'active'
+      const { data, error: userError } = await supabase
+        .from('app_users')
+        .select('id')
+        .ilike('status', '%active%'); 
+        
+      if (userError) throw new Error(`User fetch failed: ${userError.message}`);
       usersToNotify = data || [];
     } else {
       usersToNotify = [{ id: targetUserId }];
     }
 
-    // Prepare the insert array
+    // FIX: Catch empty arrays before attempting to insert
+    if (usersToNotify.length === 0) {
+      return NextResponse.json({ error: 'No active users found to notify' }, { status: 400 });
+    }
+
     const notifications = usersToNotify.map(user => ({
       user_id: user.id,
       type: 'ADMIN_MESSAGE',
       title,
       message,
-      action_url: actionUrl || null
+      action_url: actionUrl || null,
+      is_read: false // FIX: Explicitly satisfy the schema's bool requirement
     }));
 
-    // Bulk insert notifications
-    const { error } = await supabase.from('app_notifications').insert(notifications);
-    if (error) throw error;
+    const { error: insertError } = await supabase.from('app_notifications').insert(notifications);
+    if (insertError) throw insertError;
 
     return NextResponse.json({ success: true, count: notifications.length });
   } catch (error: any) {
@@ -89,7 +92,6 @@ export async function DELETE(request: Request) {
 
     const supabase = getServiceSupabase();
     
-    // Delete ALL admin messages with this exact title from everyone's inbox
     const { error } = await supabase
       .from('app_notifications')
       .delete()
