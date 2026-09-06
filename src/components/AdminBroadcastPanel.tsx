@@ -24,7 +24,13 @@ export default function AdminBroadcastPanel() {
 
   const fetchBroadcasts = async () => {
     try {
-      const res = await fetch('/api/admin/broadcast');
+      const res = await fetch('/api/admin/broadcast', {
+        cache: 'no-store', // Bypasses Next.js Data Cache
+        headers: {
+          'Cache-Control': 'no-cache', // Prevents CDN/Browser caching
+          'Pragma': 'no-cache'
+        }
+      });
       if (res.ok) {
         const data = await res.json();
         setBroadcasts(data.broadcasts || []);
