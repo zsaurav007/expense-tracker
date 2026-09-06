@@ -25,7 +25,14 @@ export async function GET() {
     // Deduplicate by title so we don't show 50 identical rows if sent to 50 users
     const uniqueBroadcasts = Array.from(new Map(data.map(item => [item.title, item])).values());
 
-    return NextResponse.json({ broadcasts: uniqueBroadcasts });
+    return NextResponse.json(
+      { broadcasts: uniqueBroadcasts },
+      {
+        headers: {
+          'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        },
+      }
+    );
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
