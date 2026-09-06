@@ -4,13 +4,34 @@ import { getSession } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
-// GET: Fetch recent broadcasts to display in the Admin UI
-export async function GET() {
-  try {
-    const session = await getSession();
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+// Helper function to handle BOTH Cookie-based sessions and Supabase Native Tokens
+async function verifyAdminAuth(request: Request, supabase: any) {
+  // 1. Try to validate via custom cookie (auth.ts)
+  const session = await getSession();
+  if (session) return true;
 
+  // 2. Try to validate via Supabase Native Auth Header (Bearer Token)
+  const authHeader = request.headers.get('Authorization');
+  if (authHeader) {
+    const token = authHeader.replace('Bearer ', '');
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    if (user && !error) return true;
+  }
+
+  // 3. Neither method provided valid credentials
+  return false;
+}
+
+// GET: Fetch recent broadcasts to display in the Admin UI
+export async function GET(request: Request) {
+  try {
     const supabase = getServiceSupabase();
+    
+    // Check Authorization
+    const isAuthorized = await verifyAdminAuth(request, supabase);
+    if (!isAuthorized) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
     
     const { data, error } = await supabase
       .from('app_notifications')
@@ -33,18 +54,20 @@ export async function GET() {
 // POST: Send a new broadcast
 export async function POST(request: Request) {
   try {
-    const session = await getSession();
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const supabase = getServiceSupabase();
+    
+    // Check Authorization
+    const isAuthorized = await verifyAdminAuth(request, supabase);
+    if (!isAuthorized) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
     const { targetUserId, title, message, actionUrl } = await request.json();
-    
-    // Admin operations require the Service Role Key to bypass RLS policies
-    const supabase = getServiceSupabase();
 
     let usersToNotify: any[] = [];
 
     if (targetUserId === 'ALL') {
-      // FIX: Use .ilike for case-insensitive matching in case DB stores 'active'
+      // Use .ilike for case-insensitive matching in case DB stores 'active'
       const { data, error: userError } = await supabase
         .from('app_users')
         .select('id')
@@ -56,7 +79,7 @@ export async function POST(request: Request) {
       usersToNotify = [{ id: targetUserId }];
     }
 
-    // FIX: Catch empty arrays before attempting to insert
+    // Catch empty arrays before attempting to insert
     if (usersToNotify.length === 0) {
       return NextResponse.json({ error: 'No active users found to notify' }, { status: 400 });
     }
@@ -67,7 +90,7 @@ export async function POST(request: Request) {
       title,
       message,
       action_url: actionUrl || null,
-      is_read: false // FIX: Explicitly satisfy the schema's bool requirement
+      is_read: false // Explicitly satisfy the schema's bool requirement
     }));
 
     const { error: insertError } = await supabase.from('app_notifications').insert(notifications);
@@ -82,16 +105,19 @@ export async function POST(request: Request) {
 // DELETE: Retract/Delete a broadcast by its title
 export async function DELETE(request: Request) {
   try {
-    const session = await getSession();
-    if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const supabase = getServiceSupabase();
+    
+    // Check Authorization
+    const isAuthorized = await verifyAdminAuth(request, supabase);
+    if (!isAuthorized) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
 
     const { searchParams } = new URL(request.url);
     const title = searchParams.get('title');
 
     if (!title) return NextResponse.json({ error: 'Title required' }, { status: 400 });
 
-    const supabase = getServiceSupabase();
-    
     const { error } = await supabase
       .from('app_notifications')
       .delete()

@@ -22,14 +22,38 @@ export default function AdminBroadcastPanel() {
   const [actionUrl, setActionUrl] = useState('');
   const [targetUser, setTargetUser] = useState('ALL');
 
+  // Helper to grab the Supabase Native Token securely without guessing your specific library wrapper
+  const getAuthHeaders = () => {
+    const headers: Record<string, string> = {
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+    };
+
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith('sb-') && key.endsWith('-auth-token')) {
+          const tokenData = JSON.parse(localStorage.getItem(key) || '{}');
+          if (tokenData?.access_token) {
+            headers['Authorization'] = `Bearer ${tokenData.access_token}`;
+            break;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Could not retrieve local Supabase token.");
+    }
+
+    return headers;
+  };
+
   const fetchBroadcasts = async () => {
     try {
-      const res = await fetch('/api/admin/broadcast', {
-        cache: 'no-store', // Bypasses Next.js Data Cache
-        headers: {
-          'Cache-Control': 'no-cache', // Prevents CDN/Browser caching
-          'Pragma': 'no-cache'
-        }
+      // Added cache-busting timestamp to strictly bypass Next.js aggressive caching
+      const res = await fetch(`/api/admin/broadcast?_t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: getAuthHeaders()
       });
       if (res.ok) {
         const data = await res.json();
@@ -52,9 +76,12 @@ export default function AdminBroadcastPanel() {
 
     setIsSending(true);
     try {
+      const headers = getAuthHeaders();
+      headers['Content-Type'] = 'application/json';
+
       const res = await fetch('/api/admin/broadcast', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           targetUserId: targetUser,
           title: title.trim(),
@@ -84,7 +111,8 @@ export default function AdminBroadcastPanel() {
     
     try {
       const res = await fetch(`/api/admin/broadcast?title=${encodeURIComponent(broadcastTitle)}`, {
-        method: 'DELETE'
+        method: 'DELETE',
+        headers: getAuthHeaders()
       });
       
       if (res.ok) {
@@ -115,7 +143,6 @@ export default function AdminBroadcastPanel() {
               className="w-full h-12 px-4 rounded-xl border border-slate-200 bg-white text-sm focus:ring-2 focus:ring-blue-500 outline-none font-medium text-slate-700"
             >
               <option value="ALL">All Active Users</option>
-              {/* You can map over individual active users here if you fetch them in the future */}
             </select>
           </div>
 
@@ -124,7 +151,7 @@ export default function AdminBroadcastPanel() {
             <input 
               type="text" required value={title} onChange={(e) => setTitle(e.target.value)}
               placeholder="E.g., System Maintenance Update"
-              className="w-full h-12 px-4 rounded-xl border border-slate-200 bg-white text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              className="w-full h-12 px-4 rounded-xl border border-slate-200 bg-white text-slate-900 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
             />
           </div>
 
@@ -133,7 +160,7 @@ export default function AdminBroadcastPanel() {
             <textarea 
               required value={message} onChange={(e) => setMessage(e.target.value)}
               placeholder="What do you want to tell your users?"
-              className="w-full p-4 rounded-xl border border-slate-200 bg-white text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none min-h-[100px]"
+              className="w-full p-4 rounded-xl border border-slate-200 bg-white text-slate-900 text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none min-h-[100px]"
             />
           </div>
 
@@ -144,7 +171,7 @@ export default function AdminBroadcastPanel() {
             <input 
               type="text" value={actionUrl} onChange={(e) => setActionUrl(e.target.value)}
               placeholder="E.g., /dashboard/settings"
-              className="w-full h-12 px-4 rounded-xl border border-slate-200 bg-slate-50 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              className="w-full h-12 px-4 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 text-sm focus:ring-2 focus:ring-blue-500 outline-none"
             />
           </div>
 
