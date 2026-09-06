@@ -124,7 +124,7 @@ export default function ExpensePage() {
     { label: 'General Expenses', value: 'EXPENSE' },
     { label: 'Credit Purchases', value: 'CREDIT_EXPENSE' },
     { label: 'Loans Given', value: 'LEND' },
-    { label: 'Installments/Dues Paid', value: 'BORROW_REPAYMENT' }, // CREDIT_REPAYMENT implicitly grouped here if we expand options later
+    { label: 'Installments/Dues Paid', value: 'BORROW_REPAYMENT' },
   ];
 
   const sortOptions = [
@@ -151,7 +151,7 @@ export default function ExpensePage() {
   const [date, setDate] = useState(todayDate);
   
   const [profileId, setProfileId] = useState('');
-  const [creditPersonId, setCreditPersonId] = useState(''); // Used for Pay Later profiles
+  const [creditPersonId, setCreditPersonId] = useState('');
   const [oneTimeName, setOneTimeName] = useState(''); 
   const [method, setMethod] = useState('');
   const [description, setDescription] = useState('');
@@ -167,7 +167,6 @@ export default function ExpensePage() {
     setIsLoading(true);
     try {
       const [txRes, profRes, peopleRes] = await Promise.all([
-        // Added CREDIT_EXPENSE and CREDIT_REPAYMENT to the fetch list
         fetch('/api/transactions?type=EXPENSE,LEND,BORROW,BORROW_REPAYMENT,LEND_REPAYMENT,CREDIT_EXPENSE,CREDIT_REPAYMENT'),
         fetch('/api/expense-profiles'),
         fetch('/api/people')
@@ -178,7 +177,6 @@ export default function ExpensePage() {
         const data = await txRes.json();
         allTxs = data.transactions || [];
         
-        // Show Expenses, Loans Given, Installment Paybacks, AND Credit Expenses + Repayments
         const visibleTxs = allTxs.filter(tx => 
           ['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'CREDIT_EXPENSE', 'CREDIT_REPAYMENT'].includes(tx.type)
         );
@@ -195,7 +193,6 @@ export default function ExpensePage() {
         const rawPeople = data.people || [];
         setPeopleOptions(rawPeople.map((p: any) => ({ label: p.name, value: p.id, type: p.profile_type })));
 
-        // Calculate precise unspent loan limit per person using ALL transactions
         const limits: Record<string, number> = {};
         rawPeople.forEach((p: any) => {
           let totalBorrowed = 0;
@@ -211,7 +208,6 @@ export default function ExpensePage() {
             if (tx.transaction_fundings) {
               tx.transaction_fundings.forEach(f => {
                 if (f.person_id === p.id) {
-                  // If editing, exclude the current transaction's contribution so you can reuse/modify it safely
                   if (!editingTxId || tx.id !== editingTxId) {
                     totalSpentFromPerson += Number(f.amount);
                   }
@@ -468,8 +464,6 @@ export default function ExpensePage() {
     return result;
   }, [transactions, searchTerm, filterType, sortOrder, dateFilter, customStartDate, customEndDate]);
 
-  // We only sum transactions that actually deduct cash out of pocket!
-  // CREDIT_EXPENSE does not remove cash right now, so it is ignored.
   const totalFilteredAmount = processedTransactions.reduce((sum, tx) => {
     if (tx.type === 'CREDIT_EXPENSE') return sum; 
     return sum + Number(tx.amount);
@@ -491,7 +485,6 @@ export default function ExpensePage() {
         <div className="flex justify-between items-center">
           <h1 className="text-xl font-bold text-slate-900">Expenses</h1>
           <div className="flex items-center gap-2">
-            {/* FILTER TOGGLE BUTTON */}
             <button 
               onClick={() => setShowFilters(!showFilters)}
               className={`p-2 rounded-full transition-colors ${showFilters ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
@@ -508,7 +501,6 @@ export default function ExpensePage() {
         </Link>
       </motion.header>
 
-      {/* DYNAMIC TOTAL SUMMARY BOX */}
       <motion.div variants={itemVariants} initial="hidden" animate="show" className="px-6 pt-6 relative z-10">
         <div className="bg-red-50 border border-red-100 p-4 rounded-2xl flex flex-col justify-center shadow-sm">
           <span className="text-xs text-red-700 font-medium mb-1">Total Cash Expense (Filtered)</span>
@@ -516,7 +508,6 @@ export default function ExpensePage() {
         </div>
       </motion.div>
 
-      {/* REUSABLE LIST CONTROLS WITH SMOOTH TOGGLE & NO CLIPPING */}
       <AnimatePresence>
         {showFilters && (
           <motion.div
@@ -542,7 +533,6 @@ export default function ExpensePage() {
                 dateOptions={dateFilterOptions}
               />
               
-              {/* Custom Date Inputs */}
               {dateFilter === 'custom' && (
                 <motion.div 
                   initial={{ opacity: 0, y: -10 }} 
@@ -644,7 +634,6 @@ export default function ExpensePage() {
              <div className="flex flex-col items-end gap-1.5 shrink-0 text-right">
                <p className={`font-bold whitespace-nowrap ${colorClass}`}>-৳{Number(tx.amount).toLocaleString()}</p>
                
-               {/* Visually indicate that Credit Expenses aren't in the total */}
                {tx.type === 'CREDIT_EXPENSE' && (
                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
                    (Not in Total)
@@ -674,7 +663,6 @@ export default function ExpensePage() {
          }
         })}
 
-        {/* REUSABLE PAGINATION CONTROLS */}
         {!isLoading && (
           <motion.div variants={itemVariants}>
             <PaginationControls 
@@ -689,7 +677,6 @@ export default function ExpensePage() {
         )}
       </motion.div>
 
-      {/* --- ANIMATED MODAL --- */}
       {mounted && createPortal(
         <AnimatePresence>
           {showModal && (
@@ -722,7 +709,6 @@ export default function ExpensePage() {
                 <form onSubmit={handleSave} className="flex flex-col flex-1 overflow-hidden">
                   <div className="space-y-4 overflow-y-auto px-1 pb-48 flex-1 overscroll-contain [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
                     
-                    {/* DUAL ACTION TOGGLE FOR EXPENSE TYPE */}
                     <div className="flex gap-2 mb-2 bg-slate-100 p-1.5 rounded-xl shrink-0 relative z-[100]">
                       <button 
                         type="button"
@@ -751,7 +737,6 @@ export default function ExpensePage() {
                       {isOverFunded && expenseMode === 'DIRECT' && <p className="text-xs text-red-500 mt-1.5 font-medium">Funded amount exceeds expense total!</p>}
                     </div>
                     
-                    {/* FIXED Z-INDEX CLIPPING HERE */}
                     <div className="relative z-[90] focus-within:z-[999] hover:z-[999]">
                       <CustomDropdown label="Asset Category / Profile" options={profileOptions} value={profileId} onChange={setProfileId} onAdd={handleAddProfile} addLabel="Create category" />
                     </div>
@@ -832,8 +817,9 @@ export default function ExpensePage() {
                         </div>
 
                         {fundingSources.map((source, index) => {
+                          // FIX: Filters out PAY_LATER accounts so they don't appear in the Funded By dropdown
                           const availablePeople = peopleOptions.filter(p => 
-                            p.value === source.personId || !fundingSources.some(f => f.personId === p.value)
+                            p.type !== 'PAY_LATER' && (p.value === source.personId || !fundingSources.some(f => f.personId === p.value))
                           );
 
                           const maxLimitForPerson = source.personId ? (personMaxLimits[source.personId] ?? 0) : null;

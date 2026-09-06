@@ -30,11 +30,12 @@ export async function GET(
     if (profileError) return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
 
     // 2. Build Transaction Query
+    // FIX: Added transaction_fundings(person_id, amount) to the select statement so the frontend knows who funded it
     let query = supabase
       .from('transactions')
-      .select('*')
+      .select('*, people_profiles(name), transaction_fundings(person_id, amount)')
       .eq('expense_profile_id', id) 
-      .eq('type', 'EXPENSE')
+      .in('type', ['EXPENSE', 'CREDIT_EXPENSE'])
       .order('date', { ascending: false })
       .order('created_at', { ascending: false });
 
@@ -60,7 +61,11 @@ export async function GET(
     if (txError) throw txError;
 
     // 4. Calculate total for the filtered period
-    const total = transactions.reduce((sum, tx) => sum + Number(tx.amount), 0);
+    // Explicitly ignore CREDIT_EXPENSE when calculating the total spent out of pocket
+    const total = transactions.reduce((sum, tx) => {
+      if (tx.type === 'CREDIT_EXPENSE') return sum;
+      return sum + Number(tx.amount);
+    }, 0);
 
     return NextResponse.json({ profile, transactions, total });
   } catch (error) {
