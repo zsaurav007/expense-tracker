@@ -6,8 +6,9 @@ import { supabase } from '@/lib/supabase';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { 
   UserPlus, Users, LogOut, Key, Shield, Activity, Clock, 
-  ChevronRight, ShieldCheck, X, Edit, Trash2, CheckCircle2, XCircle, Mail, Phone, Calendar, Loader2 
+  ChevronRight, ShieldCheck, X, Edit, Trash2, CheckCircle2, XCircle, Mail, Phone, Calendar, Loader2, PauseCircle, PlayCircle 
 } from 'lucide-react';
+import AdminBroadcastPanel from '@/components/AdminBroadcastPanel';
 
 type AppUser = {
   id: string;
@@ -34,7 +35,7 @@ export default function MasterDashboard() {
   const [masterUserId, setMasterUserId] = useState<string | null>(null);
   
   // Segregated User Lists
-  const [activeUsers, setActiveUsers] = useState<AppUser[]>([]);
+  const [directoryUsers, setDirectoryUsers] = useState<AppUser[]>([]); // Contains ACTIVE and SUSPENDED
   const [pendingUsers, setPendingUsers] = useState<AppUser[]>([]);
   
   // Create Form state
@@ -51,7 +52,7 @@ export default function MasterDashboard() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   
-  // Moderation state
+  // Moderation & Status state
   const [processingId, setProcessingId] = useState<string | null>(null);
 
   // God Mode state
@@ -138,11 +139,10 @@ export default function MasterDashboard() {
 
     if (!error && data) {
       const users = data as AppUser[];
-      // If status is NOT exactly 'ACTIVE' (catches 'PENDING' and NULL legacy accounts), put them in Pending Queue
-      setPendingUsers(users.filter(u => u.status !== 'ACTIVE'));
       
-      // Only strictly ACTIVE users go to the active directory
-      setActiveUsers(users.filter(u => u.status === 'ACTIVE'));
+      // Separate users: Active/Suspended go to Directory, everything else to Pending Queue
+      setDirectoryUsers(users.filter(u => u.status === 'ACTIVE' || u.status === 'SUSPENDED'));
+      setPendingUsers(users.filter(u => u.status !== 'ACTIVE' && u.status !== 'SUSPENDED'));
     }
   };
 
@@ -164,6 +164,41 @@ export default function MasterDashboard() {
         fetchUsers();
       } else {
         alert("Failed to process the action. Please try again.");
+      }
+    } catch (error) {
+      alert("A network error occurred.");
+    } finally {
+      setProcessingId(null);
+    }
+  };
+
+  // --- TOGGLE STATUS (HOLD USER) ---
+  const handleToggleStatus = async (userId: string, currentStatus: string) => {
+    const newStatus = currentStatus === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE';
+    const actionWord = newStatus === 'SUSPENDED' ? 'suspend' : 'reactivate';
+
+    if (!window.confirm(`Are you sure you want to ${actionWord} this user?`)) return;
+
+    setProcessingId(userId);
+
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) throw new Error('No active master session');
+
+      const res = await fetch('/api/admin/users/status', {
+        method: 'PATCH',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({ userId, status: newStatus }),
+      });
+
+      if (res.ok) {
+        fetchUsers();
+      } else {
+        const err = await res.json();
+        alert(err.error || `Failed to ${actionWord} user.`);
       }
     } catch (error) {
       alert("A network error occurred.");
@@ -375,7 +410,8 @@ export default function MasterDashboard() {
     );
   }
 
-  const newUsersThisWeek = activeUsers.filter(u => {
+  const activeUsersCount = directoryUsers.filter(u => u.status === 'ACTIVE').length;
+  const newUsersThisWeek = directoryUsers.filter(u => {
     const oneWeekAgo = new Date();
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
     return new Date(u.created_at) >= oneWeekAgo;
@@ -419,7 +455,7 @@ export default function MasterDashboard() {
           <div className="bg-white p-5 border border-slate-200 rounded-lg shadow-sm flex items-center justify-between">
             <div>
               <p className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Total Active Users</p>
-              <h3 className="text-2xl md:text-3xl font-extrabold text-slate-900">{activeUsers.length}</h3>
+              <h3 className="text-2xl md:text-3xl font-extrabold text-slate-900">{activeUsersCount}</h3>
             </div>
             <div className="h-10 w-10 md:h-12 md:w-12 bg-indigo-50 rounded-md flex items-center justify-center text-indigo-600">
               <Users className="h-5 w-5 md:h-6 md:w-6" />
@@ -628,11 +664,11 @@ export default function MasterDashboard() {
             </form>
           </motion.section>
 
-          {/* ACTIVE Users List Section */}
+          {/* ACTIVE & SUSPENDED Users Directory */}
           <motion.section variants={itemVariants} className="lg:col-span-2 bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden flex flex-col order-1 lg:order-2">
             <div className="p-4 md:p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center bg-slate-50/50 gap-4">
               <div>
-                <h2 className="text-base font-bold text-slate-900">Active User Directory</h2>
+                <h2 className="text-base font-bold text-slate-900">User Directory</h2>
                 <p className="text-xs text-slate-500 mt-1">Manage and access sub-user environments.</p>
               </div>
             </div>
@@ -640,7 +676,7 @@ export default function MasterDashboard() {
             {/* --- DESKTOP TABLE VIEW --- */}
             <div className="hidden md:block overflow-x-auto">
               <div className="overflow-y-auto max-h-[600px] min-w-[600px]">
-                <table className="w-full text-left border-collapse text-sm">
+                <table className="w-full text-left border-collapse text-sm relative">
                   <thead className="bg-slate-50 sticky top-0 border-b border-slate-200 z-10">
                     <tr>
                       <th className="px-6 py-3 font-bold text-slate-500 uppercase tracking-wider text-xs">User Profile</th>
@@ -649,22 +685,27 @@ export default function MasterDashboard() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {activeUsers.length === 0 ? (
+                    {directoryUsers.length === 0 ? (
                       <tr>
                         <td colSpan={3} className="px-6 py-12 text-center text-slate-500">
-                          No active users in the directory.
+                          No users in the directory.
                         </td>
                       </tr>
                     ) : (
-                      activeUsers.map((user) => (
-                        <tr key={user.id} className="hover:bg-slate-50 transition-colors group">
+                      directoryUsers.map((user) => (
+                        <tr key={user.id} className={`hover:bg-slate-50 transition-colors group ${user.status === 'SUSPENDED' ? 'opacity-80 bg-slate-50/50' : ''}`}>
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-3">
-                              <div className="h-9 w-9 rounded-md bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold uppercase shrink-0 border border-indigo-100">
+                              <div className={`h-9 w-9 rounded-md flex items-center justify-center font-bold uppercase shrink-0 border ${user.status === 'SUSPENDED' ? 'bg-slate-200 text-slate-500 border-slate-300' : 'bg-indigo-50 text-indigo-600 border-indigo-100'}`}>
                                 {user.full_name.charAt(0)}
                               </div>
                               <div>
-                                <p className="font-bold text-slate-900">{user.full_name}</p>
+                                <div className="flex items-center gap-2">
+                                  <p className={`font-bold ${user.status === 'SUSPENDED' ? 'text-slate-500 line-through' : 'text-slate-900'}`}>{user.full_name}</p>
+                                  {user.status === 'SUSPENDED' && (
+                                    <span className="px-2 py-0.5 bg-red-100 text-red-700 text-[9px] font-bold uppercase rounded-md border border-red-200">Hold</span>
+                                  )}
+                                </div>
                                 <p className="text-xs text-slate-500">@{user.username}</p>
                               </div>
                             </div>
@@ -672,8 +713,24 @@ export default function MasterDashboard() {
                           <td className="px-6 py-4 hidden sm:table-cell text-slate-500">
                             {new Date(user.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
                           </td>
-                          <td className="px-6 py-4">
+                          <td className="px-6 py-4 relative">
+                            {/* Loading Overlay for Status Toggle */}
+                            {processingId === user.id && (
+                              <div className="absolute inset-0 bg-white/80 flex items-center justify-end pr-6 z-10">
+                                <Loader2 className="h-5 w-5 text-indigo-600 animate-spin" />
+                              </div>
+                            )}
                             <div className="flex items-center justify-end gap-2 opacity-100 lg:opacity-0 group-hover:opacity-100 transition-opacity flex-wrap">
+                              
+                              {/* TOGGLE STATUS BUTTON */}
+                              <button 
+                                onClick={() => handleToggleStatus(user.id, user.status || 'ACTIVE')}
+                                title={user.status === 'SUSPENDED' ? "Reactivate User" : "Suspend User"}
+                                className={`p-2 rounded-md border transition-all flex items-center justify-center ${user.status === 'SUSPENDED' ? 'text-green-600 hover:text-green-700 hover:bg-green-50 border-green-200' : 'text-orange-500 hover:text-orange-600 hover:bg-orange-50 border-slate-200'}`}
+                              >
+                                {user.status === 'SUSPENDED' ? <PlayCircle className="h-3.5 w-3.5" /> : <PauseCircle className="h-3.5 w-3.5" />}
+                              </button>
+
                               <button 
                                 onClick={() => {
                                   setEditModalUser(user);
@@ -715,7 +772,8 @@ export default function MasterDashboard() {
                               </button>
                               <button 
                                 onClick={() => handleGodMode(user.id)}
-                                disabled={activeGodModeId === user.id}
+                                disabled={activeGodModeId === user.id || user.status === 'SUSPENDED'}
+                                title={user.status === 'SUSPENDED' ? "Cannot enter God Mode on a suspended account" : "Enter God Mode"}
                                 className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 text-white rounded-md text-xs font-bold hover:bg-indigo-600 disabled:opacity-50 transition-colors"
                               >
                                 <Shield className="h-3 w-3" /> 
@@ -734,19 +792,31 @@ export default function MasterDashboard() {
             {/* --- MOBILE CARD VIEW --- */}
             <div className="md:hidden flex flex-col bg-slate-50/30">
               <div className="overflow-y-auto max-h-[600px] p-4 space-y-4">
-                {activeUsers.length === 0 ? (
+                {directoryUsers.length === 0 ? (
                   <div className="text-center text-slate-500 py-8 bg-white rounded-xl border border-slate-200 border-dashed">
-                    No active users in the directory.
+                    No users in the directory.
                   </div>
                 ) : (
-                  activeUsers.map((user) => (
-                    <div key={user.id} className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-col">
+                  directoryUsers.map((user) => (
+                    <div key={user.id} className={`bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-col relative ${user.status === 'SUSPENDED' ? 'opacity-80 bg-slate-50/50' : ''}`}>
+                      
+                      {processingId === user.id && (
+                        <div className="absolute inset-0 bg-white/80 flex items-center justify-center z-10 rounded-xl">
+                          <Loader2 className="h-6 w-6 text-indigo-600 animate-spin" />
+                        </div>
+                      )}
+
                       <div className="flex items-center gap-3 mb-4">
-                        <div className="h-12 w-12 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold text-lg uppercase shrink-0 border border-indigo-100">
+                        <div className={`h-12 w-12 rounded-lg flex items-center justify-center font-bold text-lg uppercase shrink-0 border ${user.status === 'SUSPENDED' ? 'bg-slate-200 text-slate-500 border-slate-300' : 'bg-indigo-50 text-indigo-600 border-indigo-100'}`}>
                           {user.full_name.charAt(0)}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="font-bold text-slate-900 truncate">{user.full_name}</p>
+                          <div className="flex items-center gap-2">
+                            <p className={`font-bold truncate ${user.status === 'SUSPENDED' ? 'text-slate-500 line-through' : 'text-slate-900'}`}>{user.full_name}</p>
+                            {user.status === 'SUSPENDED' && (
+                              <span className="px-1.5 py-0.5 bg-red-100 text-red-700 text-[9px] font-bold uppercase rounded-md border border-red-200">Hold</span>
+                            )}
+                          </div>
                           <p className="text-xs text-slate-500 truncate">@{user.username}</p>
                           <p className="text-[10px] text-slate-400 mt-1 uppercase tracking-wider font-semibold">
                             Joined {new Date(user.created_at).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })}
@@ -754,7 +824,16 @@ export default function MasterDashboard() {
                         </div>
                       </div>
                       
-                      <div className="grid grid-cols-3 gap-2 pt-3 border-t border-slate-100">
+                      <div className="grid grid-cols-4 gap-2 pt-3 border-t border-slate-100">
+                        {/* Mobile Suspend Toggle */}
+                        <button 
+                          onClick={() => handleToggleStatus(user.id, user.status || 'ACTIVE')}
+                          className={`flex flex-col items-center justify-center gap-1 p-2 rounded-lg transition-colors ${user.status === 'SUSPENDED' ? 'bg-green-50 text-green-600 hover:bg-green-100' : 'bg-orange-50 text-orange-600 hover:bg-orange-100'}`}
+                        >
+                          {user.status === 'SUSPENDED' ? <PlayCircle className="h-4 w-4" /> : <PauseCircle className="h-4 w-4" />}
+                          <span className="text-[10px] font-bold uppercase">{user.status === 'SUSPENDED' ? 'Unsuspend' : 'Hold'}</span>
+                        </button>
+
                         <button 
                           onClick={() => {
                             setEditModalUser(user);
@@ -794,10 +873,12 @@ export default function MasterDashboard() {
                           <Trash2 className="h-4 w-4" />
                           <span className="text-[10px] font-bold uppercase">Delete</span>
                         </button>
+
+                        {/* Mobile God Mode spanning full width */}
                         <button 
                           onClick={() => handleGodMode(user.id)}
-                          disabled={activeGodModeId === user.id}
-                          className="col-span-3 mt-1 flex items-center justify-center gap-2 p-3 bg-slate-900 text-white rounded-lg text-xs font-bold hover:bg-indigo-600 disabled:opacity-50 transition-colors shadow-sm"
+                          disabled={activeGodModeId === user.id || user.status === 'SUSPENDED'}
+                          className="col-span-4 mt-1 flex items-center justify-center gap-2 p-3 bg-slate-900 text-white rounded-lg text-xs font-bold hover:bg-indigo-600 disabled:opacity-50 transition-colors shadow-sm"
                         >
                           <Shield className="h-4 w-4" /> 
                           {activeGodModeId === user.id ? 'Connecting to God Mode...' : 'Enter God Mode'}
@@ -809,8 +890,13 @@ export default function MasterDashboard() {
               </div>
             </div>
           </motion.section>
-
         </div>
+
+        {/* --- ADMIN BROADCAST PANEL --- */}
+        <motion.div variants={itemVariants}>
+          <AdminBroadcastPanel />
+        </motion.div>
+
       </motion.main>
 
       {/* --- MODALS --- */}

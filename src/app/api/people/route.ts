@@ -9,7 +9,6 @@ export async function GET() {
 
     const supabase = getServiceSupabase();
     
-    // Fetch people (including phone, profile_type, created_at) and all their related transactions
     const { data, error } = await supabase
       .from('people_profiles')
       .select(`
@@ -18,6 +17,9 @@ export async function GET() {
         phone,
         profile_type,
         created_at,
+        due_date,
+        notify_days_before,
+        installment_day,
         transactions ( type, amount )
       `)
       .eq('user_id', session.userId)
@@ -84,6 +86,9 @@ export async function GET() {
         phone: person.phone,
         profile_type: person.profile_type,
         created_at: person.created_at,
+        due_date: person.due_date,
+        notify_days_before: person.notify_days_before,
+        installment_day: person.installment_day,
         netBalance, 
         total_loan,
         total_paid
@@ -102,7 +107,8 @@ export async function POST(request: Request) {
     const session = await getSession();
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const { name, phone, profile_type } = await request.json();
+    const body = await request.json();
+    const { name, phone, profile_type, due_date, notify_days_before, installment_day } = body;
     const supabase = getServiceSupabase();
     
     // Default to LEND_BORROW if nothing is provided
@@ -114,9 +120,12 @@ export async function POST(request: Request) {
         user_id: session.userId, 
         name, 
         phone: phone || null,
-        profile_type: pType
+        profile_type: pType,
+        due_date: due_date || null,
+        notify_days_before: notify_days_before || null,
+        installment_day: installment_day || null
       }])
-      .select('id, name, phone, profile_type, created_at')
+      .select('id, name, phone, profile_type, created_at, due_date, notify_days_before, installment_day')
       .single();
 
     if (error) {

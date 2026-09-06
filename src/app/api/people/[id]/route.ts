@@ -20,10 +20,10 @@ export async function GET(
 
     const supabase = getServiceSupabase();
     
-    // 1. Fetch Person Details (Now including profile_type)
+    // 1. Fetch Person Details (Now including profile_type and reminder fields)
     const { data: person, error: personError } = await supabase
       .from('people_profiles')
-      .select('id, name, phone, profile_type')
+      .select('id, name, phone, profile_type, due_date, notify_days_before, installment_day')
       .eq('id', id)
       .eq('user_id', session.userId)
       .single();
@@ -113,7 +113,7 @@ export async function GET(
   }
 }
 
-// --- PUT: Edits the person's name/phone (Password Protected) ---
+// --- PUT: Edits the person's details (Password Protected) ---
 export async function PUT(
   request: Request, 
   { params }: { params: Promise<{ id: string }> }
@@ -124,7 +124,9 @@ export async function PUT(
 
     const resolvedParams = await params;
     const id = resolvedParams.id;
-    const { name, phone, password } = await request.json();
+    
+    // Extracted new date fields from the payload
+    const { name, phone, password, due_date, notify_days_before, installment_day } = await request.json();
 
     const supabase = getServiceSupabase();
     
@@ -136,9 +138,15 @@ export async function PUT(
     const isValid = await bcrypt.compare(password, hash);
     if (!isValid) return NextResponse.json({ error: 'Incorrect password' }, { status: 403 });
 
-    // Update Person Profile
+    // Update Person Profile including new reminder dates
     const { error } = await supabase.from('people_profiles')
-      .update({ name, phone: phone || null })
+      .update({ 
+        name, 
+        phone: phone || null,
+        due_date: due_date || null,
+        notify_days_before: notify_days_before || null,
+        installment_day: installment_day || null
+      })
       .eq('id', id)
       .eq('user_id', session.userId);
       

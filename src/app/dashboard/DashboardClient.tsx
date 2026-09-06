@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import DashboardCharts from '@/components/DashboardCharts';
 import CustomDropdown from '@/components/CustomDropdown';
+import NotificationBell from '@/components/NotificationBell';
 
 // --- TYPESCRIPT INTERFACES ---
 export interface Transaction {
@@ -358,9 +359,13 @@ export default function DashboardClient({
               <LogOut className="h-4 w-4" /> Exit
             </button>
           )}
-          <button className="p-2.5 bg-blue-500/40 rounded-full hover:bg-blue-500 transition-colors">
-            <Bell className="h-5 w-5 text-white" />
-          </button>
+          
+          {/* --- REPLACED DUMMY BELL WITH ACTUAL NOTIFICATION COMPONENT --- */}
+          {/* We use specific Tailwind classes to override the default gray button colors to match the blue header */}
+          <div className="[&_button]:!text-white [&_button]:!bg-blue-500/40 hover:[&_button]:!bg-blue-500">
+            <NotificationBell />
+          </div>
+
         </div>
       </motion.header>
 

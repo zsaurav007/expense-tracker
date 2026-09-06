@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
-import { UserPlus, UserCircle2, ChevronRight, Phone, Edit, Trash2, ShieldAlert, Plus, X, SlidersHorizontal } from 'lucide-react';
+import { UserPlus, UserCircle2, ChevronRight, Phone, Edit, Trash2, ShieldAlert, Plus, X, SlidersHorizontal, Bell, CalendarClock, CalendarDays } from 'lucide-react';
 import { TopControls, PaginationControls } from '@/components/ListControls';
 
 // --- TYPESCRIPT DEFINITIONS ---
@@ -13,10 +13,13 @@ type Person = {
   name: string;
   phone?: string;
   netBalance: number;
-  created_at?: string; // Added to safely support date filtering
+  created_at?: string; 
   profile_type?: 'LEND_BORROW' | 'PAY_LATER';
-  total_loan?: number; // Prepped for backend API update
-  total_paid?: number; // Prepped for backend API update
+  total_loan?: number; 
+  total_paid?: number; 
+  due_date?: string | null;
+  notify_days_before?: number | null;
+  installment_day?: number | null; // NEW: Day of the month for installments (1-31)
 };
 
 // --- UTILITIES ---
@@ -59,6 +62,13 @@ export default function LedgerHubPage() {
   const [newPersonName, setNewPersonName] = useState('');
   const [newPersonPhone, setNewPersonPhone] = useState('');
   const [newProfileType, setNewProfileType] = useState<'LEND_BORROW' | 'PAY_LATER'>('LEND_BORROW');
+  
+  // --- ADD PERSON REMINDER STATES ---
+  const [isNewHasDueDate, setIsNewHasDueDate] = useState(false);
+  const [newDueDate, setNewDueDate] = useState('');
+  const [newNotifyDays, setNewNotifyDays] = useState('3');
+  const [newInstallmentDay, setNewInstallmentDay] = useState(''); // NEW
+
   const [isAdding, setIsAdding] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
@@ -104,8 +114,15 @@ export default function LedgerHubPage() {
   const [activeModal, setActiveModal] = useState<'add' | 'edit' | 'delete' | 'reset' | null>(null);
   const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
   const [modalPassword, setModalPassword] = useState('');
+  
+  // --- EDIT PERSON STATES ---
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
+  const [editIsHasDueDate, setEditIsHasDueDate] = useState(false);
+  const [editDueDate, setEditDueDate] = useState('');
+  const [editNotifyDays, setEditNotifyDays] = useState('3');
+  const [editInstallmentDay, setEditInstallmentDay] = useState(''); // NEW
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [modalError, setModalError] = useState('');
 
@@ -134,16 +151,16 @@ export default function LedgerHubPage() {
       body: JSON.stringify({ 
         name: newPersonName.trim(), 
         phone: newPersonPhone.trim(),
-        profile_type: newProfileType
+        profile_type: newProfileType,
+        due_date: isNewHasDueDate && newDueDate ? newDueDate : null,
+        notify_days_before: isNewHasDueDate ? parseInt(newNotifyDays) : null,
+        installment_day: isNewHasDueDate && newInstallmentDay ? parseInt(newInstallmentDay) : null
       }),
     });
 
     if (res.ok) {
       const data = await res.json();
       setPeople([data.person, ...people]);
-      setNewPersonName('');
-      setNewPersonPhone('');
-      setNewProfileType('LEND_BORROW');
       closeModal();
     }
     setIsAdding(false);
@@ -156,7 +173,14 @@ export default function LedgerHubPage() {
     
     const res = await fetch(`/api/people/${selectedPerson?.id}`, {
       method: 'PUT',
-      body: JSON.stringify({ name: editName, phone: editPhone, password: modalPassword }),
+      body: JSON.stringify({ 
+        name: editName, 
+        phone: editPhone, 
+        password: modalPassword,
+        due_date: editIsHasDueDate && editDueDate ? editDueDate : null,
+        notify_days_before: editIsHasDueDate ? parseInt(editNotifyDays) : null,
+        installment_day: editIsHasDueDate && editInstallmentDay ? parseInt(editInstallmentDay) : null
+      }),
     });
 
     if (res.ok) {
@@ -214,9 +238,15 @@ export default function LedgerHubPage() {
     setSelectedPerson(null);
     setModalPassword('');
     setModalError('');
+    
     setNewPersonName('');
     setNewPersonPhone('');
     setNewProfileType('LEND_BORROW');
+    
+    setIsNewHasDueDate(false);
+    setNewDueDate('');
+    setNewNotifyDays('3');
+    setNewInstallmentDay('');
   };
 
   // Filter people strictly by the active tab
@@ -231,7 +261,7 @@ export default function LedgerHubPage() {
   const processedPeople = useMemo(() => {
     let result = [...currentTabPeople];
 
-    // 1. Date Filter (based on account creation date if available)
+    // 1. Date Filter
     if (dateFilter === 'custom') {
       if (customStartDate) result = result.filter(p => p.created_at && p.created_at.split('T')[0] >= customStartDate);
       if (customEndDate) result = result.filter(p => p.created_at && p.created_at.split('T')[0] <= customEndDate);
@@ -281,7 +311,6 @@ export default function LedgerHubPage() {
       >
         <h1 className="text-xl font-bold text-slate-900">Ledger Hub</h1>
         <div className="flex gap-2">
-          {/* FILTER TOGGLE BUTTON */}
           <button 
             onClick={() => setShowFilters(!showFilters)}
             className={`p-2 rounded-full transition-colors ${showFilters ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
@@ -298,7 +327,6 @@ export default function LedgerHubPage() {
         </div>
       </motion.header>
 
-      {/* REUSABLE LIST CONTROLS WITH PERFECT SMOOTH TOGGLE & OVERFLOW FIX */}
       <AnimatePresence>
         {showFilters && (
           <motion.div
@@ -324,7 +352,6 @@ export default function LedgerHubPage() {
                 dateOptions={dateFilterOptions}
               />
 
-              {/* Custom Date Inputs - Kept completely visible */}
               {dateFilter === 'custom' && (
                 <motion.div 
                   initial={{ opacity: 0, y: -10 }} 
@@ -364,7 +391,6 @@ export default function LedgerHubPage() {
         animate="show"
         className="flex-1 relative z-0"
       >
-        {/* TAB TOGGLE PILL SLIDER */}
         <motion.div variants={itemVariants} className="px-6 mt-6 mb-2">
           <div className="flex bg-slate-200/60 p-1.5 rounded-xl">
             <button
@@ -413,7 +439,6 @@ export default function LedgerHubPage() {
         </motion.div>
 
         <div className="px-6 pb-24 space-y-8">
-          {/* People List */}
           <div className="space-y-3">
             <div className="flex justify-between items-center mb-2">
               <motion.h3 variants={itemVariants} className="text-sm font-bold text-slate-400 uppercase tracking-wider">Active Accounts</motion.h3>
@@ -450,14 +475,33 @@ export default function LedgerHubPage() {
                           <Phone className="h-3 w-3" /> {person.phone}
                         </p>
                       )}
-                      <div className="mt-1">
+                      
+                      {/* DUE DATE & INSTALLMENT INDICATORS */}
+                      <div className="flex flex-col gap-0.5 mt-1.5">
+                        {person.due_date && (
+                          <p className="text-[10px] text-orange-500 font-bold flex items-center gap-1 uppercase tracking-wider">
+                            <CalendarClock className="h-3 w-3" /> Final Due: {new Date(person.due_date).toLocaleDateString()}
+                          </p>
+                        )}
+                        {person.installment_day && (
+                          <p className="text-[10px] text-indigo-500 font-bold flex items-center gap-1 uppercase tracking-wider">
+                            <CalendarDays className="h-3 w-3" /> Installments: {person.installment_day}{
+                              // Add ordinal suffix (st, nd, rd, th)
+                              [1, 21, 31].includes(person.installment_day) ? 'st' :
+                              [2, 22].includes(person.installment_day) ? 'nd' :
+                              [3, 23].includes(person.installment_day) ? 'rd' : 'th'
+                            } of month
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="mt-1.5">
                         {person.netBalance > 0 && <p className="text-sm font-bold text-green-600">{activeTab === 'PAY_LATER' ? 'Credit Receivable' : 'Loan Receivable'} ৳{person.netBalance.toLocaleString()}</p>}
                         {person.netBalance < 0 && <p className="text-sm font-bold text-red-600">{activeTab === 'PAY_LATER' ? 'Credit Payable' : 'Loan Payable'} ৳{Math.abs(person.netBalance).toLocaleString()}</p>}
                         {person.netBalance === 0 && <p className="text-sm font-bold text-slate-400">Settled up</p>}
                         
                         <div className="flex gap-3 mt-1.5 text-[10px] text-slate-400 font-medium tracking-wide">
                           <span>{activeTab === 'PAY_LATER' ? 'Total Credit' : 'Total Loan'}: ৳{person.total_loan?.toLocaleString() || 0}</span>
-                          {/* CHANGED: Dynamic label for Paid/Recv based on netBalance in LEND_BORROW tab */}
                           <span>
                             {activeTab === 'PAY_LATER' 
                               ? 'Paid' 
@@ -471,10 +515,25 @@ export default function LedgerHubPage() {
                     </div>
                   </div>
 
-                  {/* Edit & Delete Action Icons */}
                   <div className="flex items-center gap-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
                     <button 
-                      onClick={() => { setSelectedPerson(person); setEditName(person.name); setEditPhone(person.phone || ''); setActiveModal('edit'); }} 
+                      onClick={() => { 
+                        setSelectedPerson(person); 
+                        setEditName(person.name); 
+                        setEditPhone(person.phone || ''); 
+                        if (person.due_date || person.installment_day) {
+                          setEditIsHasDueDate(true);
+                          setEditDueDate(person.due_date || '');
+                          setEditNotifyDays((person.notify_days_before || 3).toString());
+                          setEditInstallmentDay(person.installment_day ? person.installment_day.toString() : '');
+                        } else {
+                          setEditIsHasDueDate(false);
+                          setEditDueDate('');
+                          setEditNotifyDays('3');
+                          setEditInstallmentDay('');
+                        }
+                        setActiveModal('edit'); 
+                      }} 
                       className="p-2 text-slate-400 hover:text-blue-600 bg-slate-50 hover:bg-blue-50 rounded-full transition-colors"
                     >
                       <Edit className="h-4 w-4" />
@@ -491,7 +550,6 @@ export default function LedgerHubPage() {
               ))
             )}
 
-            {/* REUSABLE PAGINATION CONTROLS */}
             {!isLoading && (
               <motion.div variants={itemVariants}>
                 <PaginationControls 
@@ -526,7 +584,7 @@ export default function LedgerHubPage() {
                 animate={{ y: 0 }}
                 exit={{ y: '100%' }}
                 transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-                className="relative bg-white rounded-t-3xl p-6 pb-8 shadow-2xl max-w-md mx-auto w-full"
+                className="relative bg-white rounded-t-3xl p-6 pb-8 shadow-2xl max-w-md mx-auto w-full max-h-[90vh] overflow-y-auto"
               >
                 
                 {/* ADD PERSON MODAL */}
@@ -541,7 +599,6 @@ export default function LedgerHubPage() {
                       </button>
                     </div>
 
-                    {/* DUAL ACTION TOGGLE FOR PROFILE TYPE */}
                     <div className="flex gap-2 mb-4 bg-slate-100 p-1.5 rounded-xl shrink-0">
                       <button 
                         type="button"
@@ -569,9 +626,68 @@ export default function LedgerHubPage() {
                       className="w-full h-14 px-4 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-slate-900 placeholder:text-slate-400"
                       placeholder="Phone Number (Optional)"
                     />
+
+                    {/* DUAL DATE REMINDERS FOR NEW ACCOUNT */}
+                    <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl mt-2">
+                      <button 
+                        type="button" 
+                        onClick={() => setIsNewHasDueDate(!isNewHasDueDate)} 
+                        className={`text-sm flex items-center gap-2 transition-colors font-bold ${isNewHasDueDate ? 'text-orange-600' : 'text-slate-500 hover:text-slate-700'}`}
+                      >
+                        <Bell className="h-4 w-4" />
+                        {isNewHasDueDate ? 'Payment Reminders Active' : 'Configure Payment Reminders'}
+                      </button>
+
+                      <AnimatePresence>
+                        {isNewHasDueDate && (
+                          <motion.div 
+                            initial={{ height: 0, opacity: 0, marginTop: 0 }}
+                            animate={{ height: 'auto', opacity: 1, marginTop: 16 }}
+                            exit={{ height: 0, opacity: 0, marginTop: 0 }}
+                            className="overflow-hidden space-y-3"
+                          >
+                            {/* ALIGNED GRID FOR DATE AND NOTIFY */}
+                            <div className="flex items-end gap-3">
+                              <div className="flex-[2]">
+                                <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1.5 truncate">Final Due Date (Optional)</label>
+                                <input 
+                                  type="date"
+                                  value={newDueDate} onChange={(e) => setNewDueDate(e.target.value)} 
+                                  className="w-full h-12 px-3 text-sm bg-white rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500" 
+                                />
+                              </div>
+                              <div className="flex-1">
+                                <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1.5 truncate">Notify (Days)</label>
+                                <input 
+                                  type="number" min="1" max="30"
+                                  value={newNotifyDays} onChange={(e) => setNewNotifyDays(e.target.value)} 
+                                  className="w-full h-12 px-3 text-sm bg-white rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500" 
+                                />
+                              </div>
+                            </div>
+                            
+                            {/* INSTALLMENT DAY DROPDOWN */}
+                            <div>
+                              <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1.5 truncate">Monthly Installment Day (Optional)</label>
+                              <select 
+                                value={newInstallmentDay} 
+                                onChange={(e) => setNewInstallmentDay(e.target.value)}
+                                className="w-full h-12 px-3 text-sm bg-white rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                              >
+                                <option value="">No monthly installments</option>
+                                {[...Array(31)].map((_, i) => (
+                                  <option key={i + 1} value={i + 1}>{i + 1} of every month</option>
+                                ))}
+                              </select>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+
                     <button
                       type="submit" disabled={isAdding || !newPersonName.trim()}
-                      className="w-full h-14 mt-4 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                      className="w-full h-14 mt-2 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-colors"
                     >
                       {isAdding ? 'Creating Account...' : 'Create Account'}
                     </button>
@@ -589,6 +705,7 @@ export default function LedgerHubPage() {
                         <X className="h-5 w-5" />
                       </button>
                     </div>
+                    
                     <input 
                       type="text" required value={editName} onChange={(e) => setEditName(e.target.value)} 
                       className="w-full h-14 px-4 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-slate-900 placeholder:text-slate-400" 
@@ -599,13 +716,74 @@ export default function LedgerHubPage() {
                       className="w-full h-14 px-4 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white text-slate-900 placeholder:text-slate-400" 
                       placeholder="Phone (Optional)" 
                     />
+
+                    {/* DUAL DATE REMINDERS FOR EDIT ACCOUNT */}
+                    <div className="bg-slate-50 border border-slate-100 p-4 rounded-2xl mt-2">
+                      <button 
+                        type="button" 
+                        onClick={() => setEditIsHasDueDate(!editIsHasDueDate)} 
+                        className={`text-sm flex items-center gap-2 transition-colors font-bold ${editIsHasDueDate ? 'text-orange-600' : 'text-slate-500 hover:text-slate-700'}`}
+                      >
+                        <Bell className="h-4 w-4" />
+                        {editIsHasDueDate ? 'Payment Reminders Active' : 'Configure Payment Reminders'}
+                      </button>
+
+                      <AnimatePresence>
+                        {editIsHasDueDate && (
+                          <motion.div 
+                            initial={{ height: 0, opacity: 0, marginTop: 0 }}
+                            animate={{ height: 'auto', opacity: 1, marginTop: 16 }}
+                            exit={{ height: 0, opacity: 0, marginTop: 0 }}
+                            className="overflow-hidden space-y-3"
+                          >
+                            {/* ALIGNED GRID FOR DATE AND NOTIFY */}
+                            <div className="flex items-end gap-3">
+                              <div className="flex-[2]">
+                                <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1.5 truncate">Final Due Date (Optional)</label>
+                                <input 
+                                  type="date"
+                                  value={editDueDate} onChange={(e) => setEditDueDate(e.target.value)} 
+                                  className="w-full h-12 px-3 text-sm bg-white rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500" 
+                                />
+                              </div>
+                              <div className="flex-1">
+                                <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1.5 truncate">Notify (Days)</label>
+                                <input 
+                                  type="number" min="1" max="30"
+                                  value={editNotifyDays} onChange={(e) => setEditNotifyDays(e.target.value)} 
+                                  className="w-full h-12 px-3 text-sm bg-white rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500" 
+                                />
+                              </div>
+                            </div>
+                            
+                            {/* INSTALLMENT DAY DROPDOWN */}
+                            <div>
+                              <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1.5 truncate">Monthly Installment Day (Optional)</label>
+                              <select 
+                                value={editInstallmentDay} 
+                                onChange={(e) => setEditInstallmentDay(e.target.value)}
+                                className="w-full h-12 px-3 text-sm bg-white rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                              >
+                                <option value="">No monthly installments</option>
+                                {[...Array(31)].map((_, i) => (
+                                  <option key={i + 1} value={i + 1}>{i + 1} of every month</option>
+                                ))}
+                              </select>
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+
                     <input 
                       type="password" required value={modalPassword} onChange={(e) => setModalPassword(e.target.value)} 
                       className="w-full h-14 px-4 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-slate-50 text-slate-900 placeholder:text-slate-400" 
                       placeholder="Enter your password to confirm" 
                     />
+                    
                     {modalError && <p className="text-red-500 text-sm font-semibold">{modalError}</p>}
-                    <button type="submit" disabled={isProcessing || !modalPassword} className="w-full h-14 mt-4 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 disabled:opacity-50 transition-colors">
+                    
+                    <button type="submit" disabled={isProcessing || !modalPassword} className="w-full h-14 mt-2 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 disabled:opacity-50 transition-colors">
                       {isProcessing ? 'Updating...' : 'Save Changes'}
                     </button>
                   </form>

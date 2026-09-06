@@ -9,7 +9,7 @@ export async function GET() {
   const supabase = getServiceSupabase();
   const { data, error } = await supabase
     .from('expense_profiles')
-    .select('id, name')
+    .select('id, name, billing_day, notify_days_before')
     .eq('user_id', session.userId)
     .order('name');
 
@@ -21,13 +21,18 @@ export async function POST(request: Request) {
   const session = await getSession();
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const { name } = await request.json();
+  const body = await request.json();
   const supabase = getServiceSupabase();
   
   const { data, error } = await supabase
     .from('expense_profiles')
-    .insert([{ user_id: session.userId, name }])
-    .select('id, name')
+    .insert([{ 
+      user_id: session.userId, 
+      name: body.name,
+      billing_day: body.billing_day || null,
+      notify_days_before: body.notify_days_before || null
+    }])
+    .select('id, name, billing_day, notify_days_before')
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

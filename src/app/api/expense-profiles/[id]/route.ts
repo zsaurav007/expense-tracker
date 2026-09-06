@@ -19,10 +19,11 @@ export async function GET(
 
     const supabase = getServiceSupabase();
     
-    // 1. Get Profile Name
+    // 1. Get Profile Name & Reminder Settings
+    // FIX: Added billing_day and notify_days_before so the edit modal can pre-fill the form
     const { data: profile, error: profileError } = await supabase
       .from('expense_profiles')
-      .select('id, name')
+      .select('id, name, billing_day, notify_days_before')
       .eq('id', id) 
       .eq('user_id', session.userId)
       .single();
@@ -30,7 +31,7 @@ export async function GET(
     if (profileError) return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
 
     // 2. Build Transaction Query
-    // FIX: Added transaction_fundings(person_id, amount) to the select statement so the frontend knows who funded it
+    // Fetch both EXPENSE and CREDIT_EXPENSE types, and include the person's name for credit purchases
     let query = supabase
       .from('transactions')
       .select('*, people_profiles(name), transaction_fundings(person_id, amount)')
@@ -73,7 +74,7 @@ export async function GET(
   }
 }
 
-// --- PUT: Edits the Expense Profile name ---
+// --- PUT: Edits the Expense Profile name & reminder settings ---
 export async function PUT(
   request: Request, 
   { params }: { params: Promise<{ id: string }> }
@@ -84,15 +85,21 @@ export async function PUT(
 
     const resolvedParams = await params;
     const id = resolvedParams.id;
-    const { name } = await request.json();
+    
+    // FIX: Get the entire body to access the new reminder fields
+    const body = await request.json();
 
-    if (!name) return NextResponse.json({ error: 'Name is required' }, { status: 400 });
+    if (!body.name) return NextResponse.json({ error: 'Name is required' }, { status: 400 });
 
     const supabase = getServiceSupabase();
     
-    // Update Profile Name
+    // Update Profile Name and Reminder fields
     const { error } = await supabase.from('expense_profiles')
-      .update({ name })
+      .update({ 
+        name: body.name,
+        billing_day: body.billing_day || null,
+        notify_days_before: body.notify_days_before || null
+      })
       .eq('id', id)
       .eq('user_id', session.userId);
       
