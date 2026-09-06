@@ -365,7 +365,7 @@ export default function LedgerHubPage() {
                         type="date" 
                         value={customStartDate} 
                         onChange={e => { setCustomStartDate(e.target.value); setCurrentPage(1); }} 
-                        className="w-full h-10 px-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 text-sm focus:outline-none bg-slate-50" 
+                        className="w-full h-10 px-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 text-sm focus:outline-none bg-slate-50 text-slate-900" 
                       />
                     </div>
                     <div>
@@ -374,7 +374,7 @@ export default function LedgerHubPage() {
                         type="date" 
                         value={customEndDate} 
                         onChange={e => { setCustomEndDate(e.target.value); setCurrentPage(1); }} 
-                        className="w-full h-10 px-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 text-sm focus:outline-none bg-slate-50" 
+                        className="w-full h-10 px-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 text-sm focus:outline-none bg-slate-50 text-slate-900" 
                       />
                     </div>
                   </div>
@@ -653,7 +653,7 @@ export default function LedgerHubPage() {
                                 <input 
                                   type="date"
                                   value={newDueDate} onChange={(e) => setNewDueDate(e.target.value)} 
-                                  className="w-full h-12 px-3 text-sm bg-white rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500" 
+                                  className="w-full h-12 px-3 text-sm bg-white text-slate-900 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500" 
                                 />
                               </div>
                               <div className="flex-1">
@@ -661,24 +661,31 @@ export default function LedgerHubPage() {
                                 <input 
                                   type="number" min="1" max="30"
                                   value={newNotifyDays} onChange={(e) => setNewNotifyDays(e.target.value)} 
-                                  className="w-full h-12 px-3 text-sm bg-white rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500" 
+                                  className="w-full h-12 px-3 text-sm bg-white text-slate-900 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500" 
                                 />
                               </div>
                             </div>
                             
-                            {/* INSTALLMENT DAY DROPDOWN */}
+                            {/* INSTALLMENT DAY INPUT */}
                             <div>
                               <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1.5 truncate">Monthly Installment Day (Optional)</label>
-                              <select 
+                              <input 
+                                type="number"
+                                min="1"
+                                max="31"
+                                placeholder="e.g. 5"
                                 value={newInstallmentDay} 
-                                onChange={(e) => setNewInstallmentDay(e.target.value)}
-                                className="w-full h-12 px-3 text-sm bg-white rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"
-                              >
-                                <option value="">No monthly installments</option>
-                                {[...Array(31)].map((_, i) => (
-                                  <option key={i + 1} value={i + 1}>{i + 1} of every month</option>
-                                ))}
-                              </select>
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  if (val === '' || (Number(val) >= 1 && Number(val) <= 31)) {
+                                    setNewInstallmentDay(val);
+                                  }
+                                }}
+                                className="w-full h-12 px-3 text-sm bg-white text-slate-900 placeholder:text-slate-400 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                              />
+                              <p className="text-[9px] text-slate-400 mt-1 leading-tight">
+                                *If you enter 29, 30, or 31, it will default to the last day of shorter months (like February).
+                              </p>
                             </div>
                           </motion.div>
                         )}
@@ -743,7 +750,7 @@ export default function LedgerHubPage() {
                                 <input 
                                   type="date"
                                   value={editDueDate} onChange={(e) => setEditDueDate(e.target.value)} 
-                                  className="w-full h-12 px-3 text-sm bg-white rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500" 
+                                  className="w-full h-12 px-3 text-sm bg-white text-slate-900 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500" 
                                 />
                               </div>
                               <div className="flex-1">
@@ -751,24 +758,31 @@ export default function LedgerHubPage() {
                                 <input 
                                   type="number" min="1" max="30"
                                   value={editNotifyDays} onChange={(e) => setEditNotifyDays(e.target.value)} 
-                                  className="w-full h-12 px-3 text-sm bg-white rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500" 
+                                  className="w-full h-12 px-3 text-sm bg-white text-slate-900 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500" 
                                 />
                               </div>
                             </div>
                             
-                            {/* INSTALLMENT DAY DROPDOWN */}
+                            {/* INSTALLMENT DAY INPUT */}
                             <div>
                               <label className="block text-[10px] font-extrabold text-slate-500 uppercase tracking-wider mb-1.5 truncate">Monthly Installment Day (Optional)</label>
-                              <select 
+                              <input 
+                                type="number"
+                                min="1"
+                                max="31"
+                                placeholder="e.g. 5"
                                 value={editInstallmentDay} 
-                                onChange={(e) => setEditInstallmentDay(e.target.value)}
-                                className="w-full h-12 px-3 text-sm bg-white rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"
-                              >
-                                <option value="">No monthly installments</option>
-                                {[...Array(31)].map((_, i) => (
-                                  <option key={i + 1} value={i + 1}>{i + 1} of every month</option>
-                                ))}
-                              </select>
+                                onChange={(e) => {
+                                  const val = e.target.value;
+                                  if (val === '' || (Number(val) >= 1 && Number(val) <= 31)) {
+                                    setEditInstallmentDay(val);
+                                  }
+                                }}
+                                className="w-full h-12 px-3 text-sm bg-white text-slate-900 placeholder:text-slate-400 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                              />
+                              <p className="text-[9px] text-slate-400 mt-1 leading-tight">
+                                *If you enter 29, 30, or 31, it will default to the last day of shorter months (like February).
+                              </p>
                             </div>
                           </motion.div>
                         )}
