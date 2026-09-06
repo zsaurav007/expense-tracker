@@ -211,9 +211,10 @@ export default function DashboardClient({
   });
 
   const prepareChartData = () => {
-    const map: Record<string, { month: string; income: number; expense: number }> = {};
-    
-    chartTxs.forEach(tx => {
+    const map: Record<string, { month: string; income: number; expense: number; netBalance: number }> = {};
+    let cumulativeBalance = 0; // Simulated net balance for the specific period
+
+    chartTxs.slice().reverse().forEach(tx => {
       let key = '';
       let label = '';
       const d = new Date(tx.date);
@@ -230,22 +231,77 @@ export default function DashboardClient({
         label = d.toLocaleString('default', { month: 'short', year: '2-digit' });
       }
 
-      if (!map[key]) map[key] = { month: label, income: 0, expense: 0 };
-      if (['INCOME', 'BORROW', 'LEND_REPAYMENT'].includes(tx.type)) map[key].income += Number(tx.amount);
-      if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_REPAYMENT'].includes(tx.type)) map[key].expense += Number(tx.amount);
+      if (!map[key]) map[key] = { month: label, income: 0, expense: 0, netBalance: cumulativeBalance };
+      
+      if (['INCOME', 'BORROW', 'LEND_REPAYMENT'].includes(tx.type)) {
+        map[key].income += Number(tx.amount);
+        cumulativeBalance += Number(tx.amount);
+      }
+      if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_REPAYMENT'].includes(tx.type)) {
+        map[key].expense += Number(tx.amount);
+        cumulativeBalance -= Number(tx.amount);
+      }
+      
+      map[key].netBalance = cumulativeBalance;
     });
     return Object.values(map);
   };
 
+  // Advanced Chart Data Computations
   const categoryMap: Record<string, number> = {};
+  const incomeMap: Record<string, number> = {};
+  let upfrontCash = 0;
+  let payLaterCredit = 0;
+  let earnedIncome = 0;
+  let borrowedIncome = 0;
+
   chartTxs.forEach((tx) => {
+    // Expense Category Breakdown
     if (tx.type === 'EXPENSE' || tx.type === 'CREDIT_EXPENSE') {
       const cat = tx.expense_profiles?.name || 'General';
       categoryMap[cat] = (categoryMap[cat] || 0) + Number(tx.amount);
     }
+
+    // Income Source Breakdown
+    if (tx.type === 'INCOME') {
+      const src = tx.source_or_method || 'General';
+      incomeMap[src] = (incomeMap[src] || 0) + Number(tx.amount);
+      earnedIncome += Number(tx.amount);
+    }
+    
+    // Borrowed Inflow
+    if (tx.type === 'BORROW') {
+      borrowedIncome += Number(tx.amount);
+    }
+
+    // Cash vs Credit Ratio
+    if (['EXPENSE', 'ASSET_PURCHASE'].includes(tx.type)) {
+      upfrontCash += Number(tx.amount);
+    } else if (tx.type === 'CREDIT_EXPENSE') {
+      payLaterCredit += Number(tx.amount);
+    }
   });
 
   const categoryData = Object.entries(categoryMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+  const incomeSourceData = Object.entries(incomeMap).map(([name, value]) => ({ name, value })).sort((a, b) => b.value - a.value);
+  
+  const cashVsCreditData = [];
+  if (upfrontCash > 0) cashVsCreditData.push({ name: 'Upfront (Cash/Bank)', value: upfrontCash });
+  if (payLaterCredit > 0) cashVsCreditData.push({ name: 'Pay Later (Credit)', value: payLaterCredit });
+
+  const earnedVsBorrowedData = [];
+  if (earnedIncome > 0) earnedVsBorrowedData.push({ name: 'Earned Income', value: earnedIncome });
+  if (borrowedIncome > 0) earnedVsBorrowedData.push({ name: 'Loans Taken', value: borrowedIncome });
+
+  // Ledger matrix is all-time based to show true outstanding debt
+  const loanMatrixData = Object.values(peopleBalances)
+    .filter(p => p.balance !== 0)
+    .map(p => ({
+      name: p.name,
+      owesMe: p.balance > 0 ? p.balance : 0,
+      iOwe: p.balance < 0 ? p.balance : 0 // Notice: p.balance is naturally negative when you owe them!
+    }));
+
   const chartLabel = timeOptions.find(o => o.value === chartFilter)?.label || 'This Period';
 
   // --- REPORT FILTERING ---
@@ -361,7 +417,6 @@ export default function DashboardClient({
           )}
           
           {/* --- REPLACED DUMMY BELL WITH ACTUAL NOTIFICATION COMPONENT --- */}
-          {/* We use specific Tailwind classes to override the default gray button colors to match the blue header */}
           <div className="[&_button]:!text-white [&_button]:!bg-blue-500/40 hover:[&_button]:!bg-blue-500">
             <NotificationBell />
           </div>
@@ -501,7 +556,14 @@ export default function DashboardClient({
 
         {/* Charts */}
         <motion.div variants={itemVariants} className="relative z-30">
-          <DashboardCharts monthlyData={prepareChartData()} categoryData={categoryData} />
+          <DashboardCharts 
+            monthlyData={prepareChartData()} 
+            expenseCategoryData={categoryData}
+            incomeSourceData={incomeSourceData}
+            cashVsCreditData={cashVsCreditData}
+            earnedVsBorrowedData={earnedVsBorrowedData}
+            loanMatrixData={loanMatrixData}
+          />
         </motion.div>
 
         {/* Recent Transactions */}

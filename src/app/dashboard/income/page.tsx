@@ -9,6 +9,11 @@ import CustomDropdown from '@/components/CustomDropdown';
 import { TopControls, PaginationControls } from '@/components/ListControls';
 
 // --- TYPESCRIPT DEFINITIONS ---
+interface TransactionFunding {
+  person_id: string;
+  amount: number | string;
+}
+
 type Transaction = {
   id: string;
   type: string;
@@ -19,6 +24,7 @@ type Transaction = {
   description?: string;
   person_id?: string;
   people_profiles?: { name: string };
+  transaction_fundings?: TransactionFunding[];
 };
 
 // --- UTILITIES ---
@@ -56,6 +62,7 @@ const itemVariants: Variants = {
 };
 
 export default function IncomePage() {
+  const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
@@ -121,10 +128,15 @@ export default function IncomePage() {
   const fetchIncome = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/transactions?type=INCOME,BORROW,LEND_REPAYMENT');
+      const res = await fetch('/api/transactions');
       if (res.ok) {
         const data = await res.json();
-        setTransactions(data.transactions);
+        const allTxs = data.transactions || [];
+        setAllTransactions(allTxs);
+        
+        // Filter purely for the income list view
+        const incomeTxs = allTxs.filter((tx: Transaction) => ['INCOME', 'BORROW', 'LEND_REPAYMENT'].includes(tx.type));
+        setTransactions(incomeTxs);
       }
     } catch (error) {
       console.error("Failed to fetch income", error);
@@ -261,7 +273,50 @@ export default function IncomePage() {
     return result;
   }, [transactions, searchTerm, filterType, sortOrder, dateFilter, customStartDate, customEndDate]);
 
-  const totalFilteredAmount = processedTransactions.reduce((sum, tx) => sum + Number(tx.amount), 0);
+  // --- DYNAMIC BREAKDOWN CALCULATION ---
+  const breakdown = useMemo(() => {
+    let ownMoney = 0;
+    let loan = 0;
+    let overall = 0;
+
+    processedTransactions.forEach(tx => {
+      const amt = Number(tx.amount);
+      overall += amt;
+      if (tx.type === 'BORROW') {
+        loan += amt;
+      } else if (tx.type === 'INCOME' || tx.type === 'LEND_REPAYMENT') {
+        ownMoney += amt;
+      }
+    });
+
+    let loanSpent = 0;
+    let filteredAllTxs = [...allTransactions];
+    
+    // Apply identical date filter to find matching expenses/fundings
+    if (dateFilter === 'custom') {
+      if (customStartDate) filteredAllTxs = filteredAllTxs.filter(tx => tx.date.split('T')[0] >= customStartDate);
+      if (customEndDate) filteredAllTxs = filteredAllTxs.filter(tx => tx.date.split('T')[0] <= customEndDate);
+    } else if (dateFilter !== 'all') {
+      const startDate = getStartDate(dateFilter);
+      if (startDate) filteredAllTxs = filteredAllTxs.filter(tx => tx.date.split('T')[0] >= startDate);
+    }
+
+    filteredAllTxs.forEach(tx => {
+       if (tx.type === 'BORROW_REPAYMENT') {
+           loanSpent += Number(tx.amount);
+       }
+       if (tx.transaction_fundings && tx.transaction_fundings.length > 0) {
+           tx.transaction_fundings.forEach(f => {
+               loanSpent += Number(f.amount);
+           });
+       }
+    });
+
+    // Ensure it doesn't drop below 0 if past loans were spent in the current filtered period
+    let unexpensedLoan = Math.max(0, loan - loanSpent);
+
+    return { ownMoney, loan, unexpensedLoan, overall };
+  }, [processedTransactions, allTransactions, dateFilter, customStartDate, customEndDate]);
 
   const totalPages = Math.ceil(processedTransactions.length / itemsPerPage) || 1;
   const paginatedTransactions = processedTransactions.slice(
@@ -296,9 +351,35 @@ export default function IncomePage() {
 
       {/* DYNAMIC TOTAL SUMMARY BOX */}
       <motion.div variants={itemVariants} initial="hidden" animate="show" className="px-6 pt-6 relative z-10">
-        <div className="bg-green-50 border border-green-100 p-4 rounded-2xl flex flex-col justify-center shadow-sm">
-          <span className="text-xs text-green-700 font-medium mb-1">Total Income (Filtered)</span>
-          <span className="text-2xl font-bold text-green-700">৳{totalFilteredAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+        <div className="bg-green-50 border border-green-100 rounded-3xl p-6 text-center shadow-sm relative overflow-hidden">
+          <p className="text-sm font-bold text-green-800/70 uppercase tracking-wider mb-1">
+            Overall Total ({dateFilter === 'all' ? 'All Time' : dateFilter === 'custom' ? 'Custom Range' : `This ${dateFilter}`})
+          </p>
+          <h2 className="text-4xl font-extrabold text-green-700">
+            ৳{breakdown.overall.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </h2>
+          
+          {/* Breakdown Row */}
+          <div className="mt-5 pt-4 border-t border-green-100/50 flex justify-between items-center px-2">
+            <div className="flex flex-col items-center flex-1">
+              <span className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider mb-1">Own Money</span>
+              <span className="text-sm font-bold text-blue-600">৳{breakdown.ownMoney.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </div>
+            
+            <div className="w-px h-8 bg-green-100/50 mx-2"></div>
+            
+            <div className="flex flex-col items-center flex-1">
+              <span className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider mb-1">Loan Money</span>
+              <span className="text-sm font-bold text-indigo-600">৳{breakdown.loan.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </div>
+            
+            <div className="w-px h-8 bg-green-100/50 mx-2"></div>
+            
+            <div className="flex flex-col items-center flex-1">
+              <span className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider mb-1">Unexpensed Loan</span>
+              <span className="text-sm font-bold text-orange-500">৳{breakdown.unexpensedLoan.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </div>
+          </div>
         </div>
       </motion.div>
 

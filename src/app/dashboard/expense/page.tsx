@@ -464,10 +464,31 @@ export default function ExpensePage() {
     return result;
   }, [transactions, searchTerm, filterType, sortOrder, dateFilter, customStartDate, customEndDate]);
 
-  const totalFilteredAmount = processedTransactions.reduce((sum, tx) => {
-    if (tx.type === 'CREDIT_EXPENSE') return sum; 
-    return sum + Number(tx.amount);
-  }, 0);
+  // --- BREAKDOWN CALCULATION ---
+  const breakdown = useMemo(() => {
+    let ownMoney = 0;
+    let loan = 0;
+    let onCredit = 0;
+    let overall = 0;
+
+    processedTransactions.forEach(tx => {
+      const amt = Number(tx.amount);
+      overall += amt;
+
+      if (tx.type === 'CREDIT_EXPENSE') {
+        onCredit += amt;
+      } else {
+        let txFunded = 0;
+        if (tx.transaction_fundings && tx.transaction_fundings.length > 0) {
+          txFunded = tx.transaction_fundings.reduce((sum, f) => sum + Number(f.amount), 0);
+        }
+        loan += txFunded;
+        ownMoney += (amt - txFunded);
+      }
+    });
+
+    return { ownMoney, loan, onCredit, overall };
+  }, [processedTransactions]);
 
   const totalPages = Math.ceil(processedTransactions.length / itemsPerPage) || 1;
   const paginatedTransactions = processedTransactions.slice(
@@ -502,9 +523,35 @@ export default function ExpensePage() {
       </motion.header>
 
       <motion.div variants={itemVariants} initial="hidden" animate="show" className="px-6 pt-6 relative z-10">
-        <div className="bg-red-50 border border-red-100 p-4 rounded-2xl flex flex-col justify-center shadow-sm">
-          <span className="text-xs text-red-700 font-medium mb-1">Total Cash Expense (Filtered)</span>
-          <span className="text-2xl font-bold text-red-700">৳{totalFilteredAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+        <div className="bg-red-50 border border-red-100 rounded-3xl p-6 text-center shadow-sm relative overflow-hidden">
+          <p className="text-sm font-bold text-red-800/70 uppercase tracking-wider mb-1">
+            Overall Total ({dateFilter === 'all' ? 'All Time' : dateFilter === 'custom' ? 'Custom Range' : `This ${dateFilter}`})
+          </p>
+          <h2 className="text-4xl font-extrabold text-red-700">
+            ৳{breakdown.overall.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </h2>
+          
+          {/* Breakdown Row */}
+          <div className="mt-5 pt-4 border-t border-red-100/50 flex justify-between items-center px-2">
+            <div className="flex flex-col items-center flex-1">
+              <span className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider mb-1">Own Money</span>
+              <span className="text-sm font-bold text-blue-600">৳{breakdown.ownMoney.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </div>
+            
+            <div className="w-px h-8 bg-red-100/50 mx-2"></div>
+            
+            <div className="flex flex-col items-center flex-1">
+              <span className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider mb-1">Loan</span>
+              <span className="text-sm font-bold text-indigo-600">৳{breakdown.loan.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </div>
+            
+            <div className="w-px h-8 bg-red-100/50 mx-2"></div>
+            
+            <div className="flex flex-col items-center flex-1">
+              <span className="text-[9px] font-extrabold text-slate-500 uppercase tracking-wider mb-1">On Credit</span>
+              <span className="text-sm font-bold text-red-500">৳{breakdown.onCredit.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </div>
+          </div>
         </div>
       </motion.div>
 
