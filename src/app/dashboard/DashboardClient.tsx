@@ -85,14 +85,19 @@ export default function DashboardClient({
   const [customEnd, setCustomEnd] = useState('');
 
   const timeOptions = [
+    { label: 'This Month', value: 'month' },
+    { label: 'This Year', value: 'year' },
+    { label: 'All Time', value: 'all_time' },
+    { label: 'Custom Date Range', value: 'custom' }
+  ];
+
+  const reportOptions = [
     { label: 'This Week', value: 'week' },
     { label: 'This Month', value: 'month' },
     { label: 'Last 3 Months', value: '3months' },
     { label: 'This Year', value: 'year' },
     { label: 'Custom Date Range', value: 'custom' }
   ];
-
-  const reportOptions = timeOptions;
 
   const reportTypeOptions = [
     { label: 'Overall Report (All Transactions)', value: 'ALL' },
