@@ -91,13 +91,7 @@ export default function DashboardClient({
     { label: 'Custom Date Range', value: 'custom' }
   ];
 
-  const reportOptions = [
-    { label: 'This Week', value: 'week' },
-    { label: 'This Month', value: 'month' },
-    { label: 'Last 3 Months', value: '3months' },
-    { label: 'This Year', value: 'year' },
-    { label: 'Custom Date Range', value: 'custom' }
-  ];
+  const reportOptions = timeOptions;
 
   const reportTypeOptions = [
     { label: 'Overall Report (All Transactions)', value: 'ALL' },
@@ -662,7 +656,7 @@ export default function DashboardClient({
           </h3>
           
           <div className="space-y-4">
-            <div className="relative z-30">
+            <div className="relative z-30 hover:z-50 focus-within:z-50">
               <CustomDropdown 
                 label="Report Category" 
                 options={reportTypeOptions} 
@@ -672,7 +666,7 @@ export default function DashboardClient({
               />
             </div>
 
-            <div className="relative z-20">
+            <div className="relative z-20 hover:z-50 focus-within:z-50">
               <CustomDropdown 
                 label="Timeframe" 
                 options={reportOptions} 

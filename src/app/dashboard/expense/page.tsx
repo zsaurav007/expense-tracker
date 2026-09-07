@@ -115,7 +115,7 @@ export default function ExpensePage() {
   const [itemsPerPage, setItemsPerPage] = useState(20);
 
   // Date Filter State
-  const [dateFilter, setDateFilter] = useState('all');
+  const [dateFilter, setDateFilter] = useState('month');
   const [customStartDate, setCustomStartDate] = useState('');
   const [customEndDate, setCustomEndDate] = useState('');
 
