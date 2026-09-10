@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, Variants } from 'framer-motion';
-import { Plus, ArrowUpRight, FolderOpen, ChevronRight, Wallet, Edit, Trash2, X, SlidersHorizontal, ShoppingBag } from 'lucide-react';
+import { Plus, ArrowUpRight, FolderOpen, ChevronRight, Wallet, Edit, Trash2, X, SlidersHorizontal, ShoppingBag, Landmark } from 'lucide-react';
 import CustomDropdown from '@/components/CustomDropdown';
 import { TopControls, PaginationControls } from '@/components/ListControls';
 
@@ -24,8 +24,10 @@ interface Transaction {
   description?: string;
   person_id?: string;
   expense_profile_id?: string;
+  savings_profile_id?: string;
   people_profiles?: { name: string };
   expense_profiles?: { name: string };
+  savings_profiles?: { name: string };
   transaction_fundings?: TransactionFunding[];
 }
 
@@ -103,6 +105,10 @@ export default function ExpensePage() {
   const [expenseProfiles, setExpenseProfiles] = useState<ProfileOption[]>([]);
   const [peopleOptions, setPeopleOptions] = useState<ProfileOption[]>([]);
   const [personMaxLimits, setPersonMaxLimits] = useState<Record<string, number>>({});
+  
+  // New state to map savings profile IDs to their names
+  const [savingsProfilesMap, setSavingsProfilesMap] = useState<Record<string, string>>({});
+  
   const [isLoading, setIsLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
   
@@ -122,6 +128,7 @@ export default function ExpensePage() {
   const filterOptions = [
     { label: 'All Types', value: 'ALL' },
     { label: 'General Expenses', value: 'EXPENSE' },
+    { label: 'Savings Transfers', value: 'SAVING' },
     { label: 'Credit Purchases', value: 'CREDIT_EXPENSE' },
     { label: 'Loans Given', value: 'LEND' },
     { label: 'Installments/Dues Paid', value: 'BORROW_REPAYMENT' },
@@ -166,10 +173,12 @@ export default function ExpensePage() {
   const fetchData = async () => {
     setIsLoading(true);
     try {
-      const [txRes, profRes, peopleRes] = await Promise.all([
-        fetch('/api/transactions?type=EXPENSE,LEND,BORROW,BORROW_REPAYMENT,LEND_REPAYMENT,CREDIT_EXPENSE,CREDIT_REPAYMENT'),
+      // Added fetch('/api/savings') to correctly retrieve the names of the goals
+      const [txRes, profRes, peopleRes, savingsRes] = await Promise.all([
+        fetch('/api/transactions?type=EXPENSE,LEND,BORROW,BORROW_REPAYMENT,LEND_REPAYMENT,CREDIT_EXPENSE,CREDIT_REPAYMENT,SAVING'),
         fetch('/api/expense-profiles'),
-        fetch('/api/people')
+        fetch('/api/people'),
+        fetch('/api/savings')
       ]);
       
       let allTxs: Transaction[] = [];
@@ -178,7 +187,7 @@ export default function ExpensePage() {
         allTxs = data.transactions || [];
         
         const visibleTxs = allTxs.filter(tx => 
-          ['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'CREDIT_EXPENSE', 'CREDIT_REPAYMENT'].includes(tx.type)
+          ['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'CREDIT_EXPENSE', 'CREDIT_REPAYMENT', 'SAVING'].includes(tx.type)
         );
         setTransactions(visibleTxs);
       }
@@ -220,6 +229,16 @@ export default function ExpensePage() {
         });
         setPersonMaxLimits(limits);
       }
+
+      if (savingsRes.ok) {
+        const data = await savingsRes.json();
+        const map: Record<string, string> = {};
+        (data.profiles || []).forEach((p: any) => {
+          map[p.id] = p.name;
+        });
+        setSavingsProfilesMap(map);
+      }
+
     } catch (error) {
       console.error("Failed to fetch data:", error);
     } finally {
@@ -426,7 +445,6 @@ export default function ExpensePage() {
   const processedTransactions = useMemo(() => {
     let result = [...transactions];
 
-    // 1. Date Filter
     if (dateFilter === 'custom') {
       if (customStartDate) result = result.filter(tx => tx.date.split('T')[0] >= customStartDate);
       if (customEndDate) result = result.filter(tx => tx.date.split('T')[0] <= customEndDate);
@@ -435,12 +453,10 @@ export default function ExpensePage() {
       if (startDate) result = result.filter(tx => tx.date.split('T')[0] >= startDate);
     }
 
-    // 2. Type Filter
     if (filterType !== 'ALL') {
       result = result.filter(tx => tx.type === filterType);
     }
 
-    // 3. Search Filter
     if (searchTerm) {
       const lowerTerm = searchTerm.toLowerCase();
       result = result.filter(tx => 
@@ -448,11 +464,12 @@ export default function ExpensePage() {
         tx.description?.toLowerCase().includes(lowerTerm) ||
         tx.transaction_method?.toLowerCase().includes(lowerTerm) ||
         tx.expense_profiles?.name?.toLowerCase().includes(lowerTerm) ||
-        tx.people_profiles?.name?.toLowerCase().includes(lowerTerm)
+        tx.people_profiles?.name?.toLowerCase().includes(lowerTerm) ||
+        tx.savings_profiles?.name?.toLowerCase().includes(lowerTerm) ||
+        (tx.savings_profile_id && savingsProfilesMap[tx.savings_profile_id]?.toLowerCase().includes(lowerTerm))
       );
     }
 
-    // 4. Sort
     result.sort((a, b) => {
       if (sortOrder === 'date-desc') return new Date(b.date).getTime() - new Date(a.date).getTime();
       if (sortOrder === 'date-asc') return new Date(a.date).getTime() - new Date(b.date).getTime();
@@ -462,7 +479,7 @@ export default function ExpensePage() {
     });
 
     return result;
-  }, [transactions, searchTerm, filterType, sortOrder, dateFilter, customStartDate, customEndDate]);
+  }, [transactions, searchTerm, filterType, sortOrder, dateFilter, customStartDate, customEndDate, savingsProfilesMap]);
 
   // --- BREAKDOWN CALCULATION ---
   const breakdown = useMemo(() => {
@@ -483,6 +500,7 @@ export default function ExpensePage() {
           txFunded = tx.transaction_fundings.reduce((sum, f) => sum + Number(f.amount), 0);
         }
         loan += txFunded;
+        // This dynamically deducts SAVING type out of Own Money just like regular expenses
         ownMoney += (amt - txFunded);
       }
     });
@@ -566,44 +584,26 @@ export default function ExpensePage() {
           >
             <div className="pb-4">
               <TopControls 
-                searchTerm={searchTerm} 
-                setSearchTerm={(val) => { setSearchTerm(val); setCurrentPage(1); }} 
-                filterType={filterType} 
-                setFilterType={(val) => { setFilterType(val); setCurrentPage(1); }} 
+                searchTerm={searchTerm} setSearchTerm={(val) => { setSearchTerm(val); setCurrentPage(1); }} 
+                filterType={filterType} setFilterType={(val) => { setFilterType(val); setCurrentPage(1); }} 
                 filterOptions={filterOptions} 
-                sortOrder={sortOrder} 
-                setSortOrder={(val) => { setSortOrder(val); setCurrentPage(1); }} 
+                sortOrder={sortOrder} setSortOrder={(val) => { setSortOrder(val); setCurrentPage(1); }} 
                 sortOptions={sortOptions} 
                 searchPlaceholder="Search expense records..."
-                dateFilter={dateFilter}
-                setDateFilter={(val) => { setDateFilter(val); setCurrentPage(1); }}
+                dateFilter={dateFilter} setDateFilter={(val) => { setDateFilter(val); setCurrentPage(1); }}
                 dateOptions={dateFilterOptions}
               />
               
               {dateFilter === 'custom' && (
-                <motion.div 
-                  initial={{ opacity: 0, y: -10 }} 
-                  animate={{ opacity: 1, y: 0 }} 
-                  className="px-6 mt-3 relative z-20"
-                >
+                <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} className="px-6 mt-3 relative z-20">
                   <div className="grid grid-cols-2 gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
                     <div>
                       <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">From</label>
-                      <input 
-                        type="date" 
-                        value={customStartDate} 
-                        onChange={e => { setCustomStartDate(e.target.value); setCurrentPage(1); }} 
-                        className="w-full h-10 px-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 text-sm focus:outline-none bg-slate-50" 
-                      />
+                      <input type="date" value={customStartDate} onChange={e => { setCustomStartDate(e.target.value); setCurrentPage(1); }} className="w-full h-10 px-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 text-sm focus:outline-none bg-slate-50" />
                     </div>
                     <div>
                       <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-1.5">To</label>
-                      <input 
-                        type="date" 
-                        value={customEndDate} 
-                        onChange={e => { setCustomEndDate(e.target.value); setCurrentPage(1); }} 
-                        className="w-full h-10 px-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 text-sm focus:outline-none bg-slate-50" 
-                      />
+                      <input type="date" value={customEndDate} onChange={e => { setCustomEndDate(e.target.value); setCurrentPage(1); }} className="w-full h-10 px-3 rounded-lg border border-slate-200 focus:ring-2 focus:ring-blue-500 text-sm focus:outline-none bg-slate-50" />
                     </div>
                   </div>
                 </motion.div>
@@ -627,7 +627,7 @@ export default function ExpensePage() {
          let colorClass = 'text-red-600';
          let bgClass = 'bg-red-50 border-red-100';
          let displayName = tx.expense_profiles?.name || tx.source_or_method;
-         let subText = tx.description ? `${tx.description} • ${tx.transaction_method}` : tx.transaction_method;
+         let subText = tx.transaction_method;
 
          if (tx.type === 'LEND') {
            Icon = ArrowUpRight;
@@ -644,6 +644,14 @@ export default function ExpensePage() {
          } else if (tx.type === 'CREDIT_REPAYMENT') {
            Icon = Wallet;
            displayName = `Due Paid to ${tx.people_profiles?.name || tx.source_or_method}`;
+         } else if (tx.type === 'SAVING') {
+           Icon = Landmark;
+           colorClass = 'text-emerald-600';
+           bgClass = 'bg-emerald-50 border-emerald-100';
+           // THIS IS THE FIX: Will accurately show the profile name from the map if it exists!
+           const profileName = tx.savings_profiles?.name || (tx.savings_profile_id ? savingsProfilesMap[tx.savings_profile_id] : null) || 'Unknown Goal';
+           displayName = `Savings Installment (${profileName})`;
+           subText = `Transfer via ${tx.transaction_method}`;
          }
          
          const isFunded = tx.transaction_fundings && tx.transaction_fundings.length > 0;
@@ -658,46 +666,58 @@ export default function ExpensePage() {
          }
          
          const CardContent = (
-           <div className="flex items-center justify-between p-4 bg-white rounded-xl border border-slate-100 shadow-sm active:bg-slate-50 transition-colors gap-4 group">
-             <div className="flex items-center gap-3 flex-1 min-w-0">
-               <div className={`h-10 w-10 rounded-full flex items-center justify-center border shrink-0 relative ${bgClass}`}>
-                 <Icon className={`h-5 w-5 ${colorClass}`} />
-                 {isFunded && <div className="absolute -top-1 -right-1 h-3 w-3 bg-blue-500 border-2 border-white rounded-full"></div>}
-               </div>
-               <div className="flex-1 min-w-0">
-                 <div className="flex items-start gap-1">
-                   <p className="font-semibold text-slate-900 leading-tight break-words">{displayName}</p>
-                   {(tx.expense_profile_id || tx.person_id) && <ChevronRight className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />}
+           <div className="flex flex-col p-4 bg-white rounded-xl border border-slate-100 shadow-sm active:bg-slate-50 transition-colors group">
+             <div className="flex items-center justify-between gap-4">
+               <div className="flex items-center gap-3 flex-1 min-w-0">
+                 <div className={`h-10 w-10 rounded-full flex items-center justify-center border shrink-0 relative ${bgClass}`}>
+                   <Icon className={`h-5 w-5 ${colorClass}`} />
+                   {isFunded && <div className="absolute -top-1 -right-1 h-3 w-3 bg-blue-500 border-2 border-white rounded-full"></div>}
                  </div>
-                 <p className="text-xs text-slate-500 mt-1 break-words leading-snug">{formatDate(tx.date)} • {subText}</p>
-                 {isFunded && (
-                   <p className="text-[11px] font-medium text-blue-600 mt-0.5 leading-snug truncate">
-                     {funderNames}
+                 <div className="flex-1 min-w-0">
+                   <div className="flex items-start gap-1">
+                     <p className="font-semibold text-slate-900 leading-tight break-words">{displayName}</p>
+                     {(tx.expense_profile_id || tx.person_id || tx.type === 'SAVING') && <ChevronRight className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />}
+                   </div>
+                   <p className="text-xs text-slate-500 mt-1 break-words leading-snug">{formatDate(tx.date)} • {subText}</p>
+                   {isFunded && (
+                     <p className="text-[11px] font-medium text-blue-600 mt-0.5 leading-snug truncate">
+                       {funderNames}
+                     </p>
+                   )}
+                 </div>
+               </div>
+               
+               <div className="flex flex-col items-end gap-1.5 shrink-0 text-right">
+                 <p className={`font-bold whitespace-nowrap ${colorClass}`}>-৳{Number(tx.amount).toLocaleString()}</p>
+                 
+                 {tx.type === 'CREDIT_EXPENSE' && (
+                   <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
+                     (Not in Total)
                    </p>
+                 )}
+
+                 {['EXPENSE', 'CREDIT_EXPENSE'].includes(tx.type) && (
+                   <div className="flex items-center gap-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                     <button onClick={(e) => handleEditClick(tx, e)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors">
+                       <Edit className="h-4 w-4" />
+                     </button>
+                     <button onClick={(e) => handleDeleteClick(tx.id, e)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors">
+                       <Trash2 className="h-4 w-4" />
+                     </button>
+                   </div>
                  )}
                </div>
              </div>
-             
-             <div className="flex flex-col items-end gap-1.5 shrink-0 text-right">
-               <p className={`font-bold whitespace-nowrap ${colorClass}`}>-৳{Number(tx.amount).toLocaleString()}</p>
-               
-               {tx.type === 'CREDIT_EXPENSE' && (
-                 <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">
-                   (Not in Total)
-                 </p>
-               )}
 
-               {['EXPENSE', 'CREDIT_EXPENSE'].includes(tx.type) && (
-                 <div className="flex items-center gap-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
-                   <button onClick={(e) => handleEditClick(tx, e)} className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors">
-                     <Edit className="h-4 w-4" />
-                   </button>
-                   <button onClick={(e) => handleDeleteClick(tx.id, e)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors">
-                     <Trash2 className="h-4 w-4" />
-                   </button>
-                 </div>
-               )}
-             </div>
+             {/* Explicit Comment / Remarks Bubble */}
+             {tx.description && (
+                <div className="mt-3 pl-[52px] pr-2">
+                  <p className="text-[11px] text-slate-600 bg-slate-50 border border-slate-100 p-2.5 rounded-lg break-words leading-relaxed">
+                    <span className="font-bold text-slate-400 uppercase tracking-wider mr-1.5">Note:</span> 
+                    {tx.description}
+                  </p>
+                </div>
+              )}
            </div>
          );
 
@@ -705,6 +725,8 @@ export default function ExpensePage() {
            return <motion.div key={tx.id} variants={itemVariants}><Link href={`/dashboard/expense/profiles/${tx.expense_profile_id}`} className="block">{CardContent}</Link></motion.div>;
          } else if (['LEND', 'BORROW_REPAYMENT', 'CREDIT_REPAYMENT'].includes(tx.type) && tx.person_id) {
            return <motion.div key={tx.id} variants={itemVariants}><Link href={`/dashboard/ledger/${tx.person_id}`} className="block">{CardContent}</Link></motion.div>;
+         } else if (tx.type === 'SAVING') {
+           return <motion.div key={tx.id} variants={itemVariants}><Link href={tx.savings_profile_id ? `/dashboard/savings/${tx.savings_profile_id}` : '/dashboard/savings'} className="block">{CardContent}</Link></motion.div>;
          } else {
            return <motion.div key={tx.id} variants={itemVariants}>{CardContent}</motion.div>;
          }
@@ -729,18 +751,13 @@ export default function ExpensePage() {
           {showModal && (
             <div className="fixed inset-0 z-[9999] flex flex-col justify-end">
               <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
+                initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                 className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" 
                 onClick={() => { setShowModal(false); resetForm(); }} 
               />
               
               <motion.div 
-                initial={{ y: '100%' }}
-                animate={{ y: 0 }}
-                exit={{ y: '100%' }}
-                transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+                initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 25, stiffness: 300 }}
                 className="relative bg-white rounded-t-3xl p-6 pb-8 shadow-2xl max-w-md mx-auto w-full flex flex-col max-h-[92vh]"
               >
                 <div className="flex justify-between items-center mb-4 shrink-0">
@@ -791,9 +808,7 @@ export default function ExpensePage() {
                     <AnimatePresence>
                       {profileId === 'NONE' && (
                         <motion.div 
-                          initial={{ opacity: 0, height: 0, marginTop: 0 }} 
-                          animate={{ opacity: 1, height: 'auto', marginTop: 16 }} 
-                          exit={{ opacity: 0, height: 0, marginTop: 0 }} 
+                          initial={{ opacity: 0, height: 0, marginTop: 0 }} animate={{ opacity: 1, height: 'auto', marginTop: 16 }} exit={{ opacity: 0, height: 0, marginTop: 0 }} 
                           className="overflow-hidden relative z-[85]"
                         >
                           <label className="block text-sm font-medium text-slate-700 mb-1.5">Asset Name (One-time)</label>
@@ -835,13 +850,7 @@ export default function ExpensePage() {
                     {expenseMode === 'CREDIT' ? (
                       <div className="pt-6 mt-4 border-t border-slate-100 relative z-[50] focus-within:z-[999] hover:z-[999]">
                         <label className="block text-sm font-medium text-slate-700 mb-1.5">Select Pay Later Account</label>
-                        <CustomDropdown 
-                          label="" 
-                          options={payLaterOptions} 
-                          value={creditPersonId} 
-                          onChange={setCreditPersonId} 
-                          showSearch={true} 
-                        />
+                        <CustomDropdown label="" options={payLaterOptions} value={creditPersonId} onChange={setCreditPersonId} showSearch={true} />
                         {payLaterOptions.length === 0 && (
                           <p className="text-xs text-orange-500 mt-2 font-medium">No Pay Later accounts found. Please create one in the Ledger Hub.</p>
                         )}

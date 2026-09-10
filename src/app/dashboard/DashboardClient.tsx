@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { motion, Variants } from 'framer-motion';
 import { 
   Bell, ArrowUpRight, ArrowDownRight, Wallet, 
-  HandCoins, History, Users, Download, FileSpreadsheet, Printer, LogOut, FileText, ShoppingBag
+  HandCoins, History, Users, Download, FileSpreadsheet, Printer, LogOut, FileText, ShoppingBag, Landmark
 } from 'lucide-react';
 import DashboardCharts from '@/components/DashboardCharts';
 import CustomDropdown from '@/components/CustomDropdown';
@@ -21,6 +21,7 @@ export interface Transaction {
   person_id?: string | null;
   people_profiles?: { name: string } | null;
   expense_profiles?: { name: string } | null;
+  savings_profile_id?: string | null;
   source_or_method?: string;
   description?: string;
   transaction_method?: string;
@@ -147,7 +148,7 @@ export default function DashboardClient({
     
     // 1. Calculate Main Wallet Balance
     if (['INCOME', 'BORROW', 'LEND_REPAYMENT'].includes(tx.type)) totalBalance += amt;
-    if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_REPAYMENT'].includes(tx.type)) totalBalance -= amt;
+    if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_REPAYMENT', 'SAVING'].includes(tx.type)) totalBalance -= amt;
 
     // 2. Calculate Active Debt for Unspent Loan Math (Standard Loans)
     if (tx.type === 'BORROW') { currentDebt += amt; totalBorrowTaken += amt; }
@@ -206,7 +207,7 @@ export default function DashboardClient({
   chartTxs.forEach((tx) => {
     const amt = Number(tx.amount);
     if (['INCOME', 'BORROW', 'LEND_REPAYMENT'].includes(tx.type)) filteredIncome += amt;
-    if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_REPAYMENT'].includes(tx.type)) filteredExpense += amt;
+    if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_REPAYMENT', 'SAVING'].includes(tx.type)) filteredExpense += amt;
   });
 
   const prepareChartData = () => {
@@ -236,7 +237,7 @@ export default function DashboardClient({
         map[key].income += Number(tx.amount);
         cumulativeBalance += Number(tx.amount);
       }
-      if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_REPAYMENT'].includes(tx.type)) {
+      if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_REPAYMENT', 'SAVING'].includes(tx.type)) {
         map[key].expense += Number(tx.amount);
         cumulativeBalance -= Number(tx.amount);
       }
@@ -261,6 +262,10 @@ export default function DashboardClient({
       categoryMap[cat] = (categoryMap[cat] || 0) + Number(tx.amount);
     }
 
+    if (tx.type === 'SAVING') {
+      categoryMap['Savings Transfer'] = (categoryMap['Savings Transfer'] || 0) + Number(tx.amount);
+    }
+
     // Income Source Breakdown
     if (tx.type === 'INCOME') {
       const src = tx.source_or_method || 'General';
@@ -274,7 +279,7 @@ export default function DashboardClient({
     }
 
     // Cash vs Credit Ratio
-    if (['EXPENSE', 'ASSET_PURCHASE'].includes(tx.type)) {
+    if (['EXPENSE', 'ASSET_PURCHASE', 'SAVING'].includes(tx.type)) {
       upfrontCash += Number(tx.amount);
     } else if (tx.type === 'CREDIT_EXPENSE') {
       payLaterCredit += Number(tx.amount);
@@ -298,7 +303,7 @@ export default function DashboardClient({
     .map(p => ({
       name: p.name,
       owesMe: p.balance > 0 ? p.balance : 0,
-      iOwe: p.balance < 0 ? p.balance : 0 // Notice: p.balance is naturally negative when you owe them!
+      iOwe: p.balance < 0 ? p.balance : 0 
     }));
 
   const chartLabel = timeOptions.find(o => o.value === chartFilter)?.label || 'This Period';
@@ -315,7 +320,7 @@ export default function DashboardClient({
     }
     
     const isIncomeType = ['INCOME', 'BORROW', 'LEND_REPAYMENT'].includes(t.type);
-    const isExpenseType = ['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_EXPENSE', 'CREDIT_REPAYMENT'].includes(t.type);
+    const isExpenseType = ['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_EXPENSE', 'CREDIT_REPAYMENT', 'SAVING'].includes(t.type);
 
     if (reportType === 'INCOME' && !isIncomeType) return false;
     if (reportType === 'EXPENSE' && !isExpenseType) return false;
@@ -327,7 +332,7 @@ export default function DashboardClient({
   reportTxs.forEach(t => {
     const amt = Number(t.amount);
     if (t.type === 'INCOME') repIncome += amt;
-    if (['EXPENSE', 'ASSET_PURCHASE', 'CREDIT_EXPENSE'].includes(t.type)) repExpense += amt;
+    if (['EXPENSE', 'ASSET_PURCHASE', 'CREDIT_EXPENSE', 'SAVING'].includes(t.type)) repExpense += amt;
     if (['LEND', 'BORROW_REPAYMENT', 'CREDIT_REPAYMENT'].includes(t.type)) repLend += amt;
     if (['BORROW', 'LEND_REPAYMENT'].includes(t.type)) repBorrow += amt;
   });
@@ -340,6 +345,7 @@ export default function DashboardClient({
     if (type === 'ASSET_PURCHASE') return 'Asset Purchase';
     if (type === 'CREDIT_EXPENSE') return 'Credit Purchase';
     if (type === 'CREDIT_REPAYMENT') return 'Credit Debt Paid';
+    if (type === 'SAVING') return 'Savings Deposit';
     return type.charAt(0).toUpperCase() + type.slice(1).toLowerCase();
   };
 
@@ -357,7 +363,7 @@ export default function DashboardClient({
     reportTxs.forEach((tx, i) => {
       const name = tx.expense_profiles?.name || tx.people_profiles?.name || tx.source_or_method || 'Unknown';
       const remarks = `"${(tx.description || '').replace(/"/g, '""')}"`;
-      const isOut = ['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_EXPENSE', 'CREDIT_REPAYMENT'].includes(tx.type);
+      const isOut = ['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_EXPENSE', 'CREDIT_REPAYMENT', 'SAVING'].includes(tx.type);
       const incAmt = !isOut ? tx.amount : '';
       const expAmt = isOut ? tx.amount : '';
       
@@ -415,7 +421,6 @@ export default function DashboardClient({
             </button>
           )}
           
-          {/* --- REPLACED DUMMY BELL WITH ACTUAL NOTIFICATION COMPONENT --- */}
           <div className="[&_button]:!text-white [&_button]:!bg-blue-500/40 hover:[&_button]:!bg-blue-500">
             <NotificationBell />
           </div>
@@ -578,7 +583,7 @@ export default function DashboardClient({
                 let route = '/dashboard';
                 let displayName = tx.source_or_method || 'Unknown';
 
-                if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_EXPENSE', 'CREDIT_REPAYMENT'].includes(tx.type)) { 
+                if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_EXPENSE', 'CREDIT_REPAYMENT', 'SAVING'].includes(tx.type)) { 
                   colorClass = 'text-red-600'; 
                   bgClass = 'bg-red-50 border-red-100'; 
                   isPositive = false; 
@@ -592,6 +597,13 @@ export default function DashboardClient({
                 else if (tx.type === 'INCOME') { 
                   route = '/dashboard/income'; 
                 } 
+                else if (tx.type === 'SAVING') { 
+                  Icon = Landmark; 
+                  displayName = `Savings Deposit`; 
+                  colorClass = 'text-emerald-600';
+                  bgClass = 'bg-emerald-50 border-emerald-100';
+                  route = tx.savings_profile_id ? `/dashboard/savings/${tx.savings_profile_id}` : '/dashboard/savings'; 
+                }
                 else if (tx.type === 'LEND') { 
                   Icon = ArrowUpRight; 
                   displayName = `Loan to ${tx.people_profiles?.name || 'Unknown'}`; 
@@ -630,18 +642,30 @@ export default function DashboardClient({
                 }
 
                 return (
-                  <Link key={tx.id} href={route} className="flex items-center justify-between p-4 bg-white rounded-xl border border-slate-100 shadow-sm active:bg-slate-50 transition-colors">
-                    <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <div className={`h-10 w-10 rounded-full flex items-center justify-center border shrink-0 ${bgClass}`}><Icon className={`h-5 w-5 ${colorClass}`} /></div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-semibold text-slate-900 leading-tight break-words">{displayName}</p>
-                        <p className="text-xs text-slate-500 mt-1 break-words">{formatDate(tx.date)} • {tx.transaction_method || 'Unknown'}</p>
+                  <Link key={tx.id} href={route} className="flex flex-col p-4 bg-white rounded-xl border border-slate-100 shadow-sm active:bg-slate-50 transition-colors group">
+                    <div className="flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <div className={`h-10 w-10 rounded-full flex items-center justify-center border shrink-0 ${bgClass}`}><Icon className={`h-5 w-5 ${colorClass}`} /></div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-semibold text-slate-900 leading-tight break-words">{displayName}</p>
+                          <p className="text-xs text-slate-500 mt-1 break-words">{formatDate(tx.date)} • {tx.transaction_method || 'Unknown'}</p>
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-1 shrink-0 text-right">
+                        <p className={`font-bold whitespace-nowrap pl-2 ${colorClass}`}>{isPositive ? '+' : '-'}৳{Number(tx.amount).toLocaleString()}</p>
+                        {tx.type === 'CREDIT_EXPENSE' && <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">(Unpaid)</p>}
                       </div>
                     </div>
-                    <div className="flex flex-col items-end gap-1 shrink-0 text-right">
-                      <p className={`font-bold whitespace-nowrap pl-2 ${colorClass}`}>{isPositive ? '+' : '-'}৳{Number(tx.amount).toLocaleString()}</p>
-                      {tx.type === 'CREDIT_EXPENSE' && <p className="text-[9px] font-bold text-slate-400 uppercase tracking-wider">(Unpaid)</p>}
-                    </div>
+
+                    {/* Explicit Comment / Remarks Bubble */}
+                    {tx.description && (
+                      <div className="mt-3 pl-[52px] pr-2">
+                        <p className="text-[11px] text-slate-600 bg-slate-50 border border-slate-100 p-2.5 rounded-lg break-words leading-relaxed">
+                          <span className="font-bold text-slate-400 uppercase tracking-wider mr-1.5">Note:</span> 
+                          {tx.description}
+                        </p>
+                      </div>
+                    )}
                   </Link>
                 );
               })
@@ -656,7 +680,7 @@ export default function DashboardClient({
           </h3>
           
           <div className="space-y-4">
-            <div className="relative z-30 hover:z-50 focus-within:z-50">
+            <div className="relative z-30">
               <CustomDropdown 
                 label="Report Category" 
                 options={reportTypeOptions} 
@@ -666,7 +690,7 @@ export default function DashboardClient({
               />
             </div>
 
-            <div className="relative z-20 hover:z-50 focus-within:z-50">
+            <div className="relative z-20">
               <CustomDropdown 
                 label="Timeframe" 
                 options={reportOptions} 
@@ -729,7 +753,7 @@ export default function DashboardClient({
             <tbody>
               {reportTxs.map((tx, index) => {
                 const name = tx.expense_profiles?.name || tx.people_profiles?.name || tx.source_or_method || 'Unknown';
-                const isOut = ['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_EXPENSE', 'CREDIT_REPAYMENT'].includes(tx.type);
+                const isOut = ['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_EXPENSE', 'CREDIT_REPAYMENT', 'SAVING'].includes(tx.type);
                 return (
                   <tr key={tx.id} className="hover:bg-slate-50 break-inside-avoid">
                     <td className="border border-slate-300 px-4 py-3 text-center">{index + 1}</td>
@@ -750,7 +774,6 @@ export default function DashboardClient({
             </tbody>
           </table>
 
-          {/* Report Summary */}
           <div className="flex flex-col items-end mt-8 break-inside-avoid">
             <div className="w-[450px] bg-slate-50 border border-slate-200 rounded-xl p-6">
               <h3 className="text-lg font-bold text-slate-800 border-b border-slate-200 pb-3 mb-4 uppercase tracking-wider">Report Summary</h3>

@@ -275,24 +275,53 @@ export default function IncomePage() {
 
   // --- DYNAMIC BREAKDOWN CALCULATION ---
   const breakdown = useMemo(() => {
-    let ownMoney = 0;
     let loan = 0;
     let overall = 0;
 
+    // 1. Calculate the Period's Inflow (for the big "Overall Total" number)
     processedTransactions.forEach(tx => {
       const amt = Number(tx.amount);
       overall += amt;
       if (tx.type === 'BORROW') {
         loan += amt;
-      } else if (tx.type === 'INCOME' || tx.type === 'LEND_REPAYMENT') {
-        ownMoney += amt;
       }
     });
 
+    // 2. Calculate the True Global Own Money (Dynamically deducting Savings and Expenses!)
+    let globalBalance = 0;
+    let globalDebt = 0;
+    let globalFundedAssets = 0;
+
+    allTransactions.forEach(tx => {
+      const amt = Number(tx.amount);
+      
+      // Income additions
+      if (['INCOME', 'BORROW', 'LEND_REPAYMENT'].includes(tx.type)) {
+        globalBalance += amt;
+      }
+      
+      // Expenses AND Savings deductions
+      if (['EXPENSE', 'LEND', 'BORROW_REPAYMENT', 'ASSET_PURCHASE', 'CREDIT_REPAYMENT', 'SAVING'].includes(tx.type)) {
+        globalBalance -= amt;
+      }
+
+      if (tx.type === 'BORROW') globalDebt += amt;
+      if (tx.type === 'BORROW_REPAYMENT') globalDebt -= amt;
+
+      if (tx.transaction_fundings) {
+        tx.transaction_fundings.forEach(f => {
+          globalFundedAssets += Number(f.amount);
+        });
+      }
+    });
+
+    const unspentLoanMoney = Math.max(0, globalDebt - globalFundedAssets);
+    const trueOwnMoney = globalBalance - unspentLoanMoney;
+
+    // 3. Unexpensed Loan Math for the Period
     let loanSpent = 0;
     let filteredAllTxs = [...allTransactions];
     
-    // Apply identical date filter to find matching expenses/fundings
     if (dateFilter === 'custom') {
       if (customStartDate) filteredAllTxs = filteredAllTxs.filter(tx => tx.date.split('T')[0] >= customStartDate);
       if (customEndDate) filteredAllTxs = filteredAllTxs.filter(tx => tx.date.split('T')[0] <= customEndDate);
@@ -312,10 +341,9 @@ export default function IncomePage() {
        }
     });
 
-    // Ensure it doesn't drop below 0 if past loans were spent in the current filtered period
     let unexpensedLoan = Math.max(0, loan - loanSpent);
 
-    return { ownMoney, loan, unexpensedLoan, overall };
+    return { ownMoney: trueOwnMoney, loan, unexpensedLoan, overall };
   }, [processedTransactions, allTransactions, dateFilter, customStartDate, customEndDate]);
 
   const totalPages = Math.ceil(processedTransactions.length / itemsPerPage) || 1;
@@ -454,7 +482,7 @@ export default function IncomePage() {
            
            let Icon = ArrowDownRight;
            let displayName = tx.source_or_method;
-           let subText = tx.description ? `${tx.description} • ${tx.transaction_method}` : tx.transaction_method;
+           let subText = tx.transaction_method;
 
            if (tx.type === 'BORROW') {
              Icon = ArrowDownRight;
@@ -465,40 +493,52 @@ export default function IncomePage() {
            }
 
            const CardContent = (
-             <div className="flex items-center justify-between p-4 bg-white rounded-xl border border-slate-100 shadow-sm active:bg-slate-50 transition-colors gap-4 group">
-               <div className="flex items-center gap-3 flex-1 min-w-0">
-                 <div className="h-10 w-10 bg-green-50 rounded-full flex items-center justify-center border border-green-100 shrink-0">
-                   <Icon className="h-5 w-5 text-green-600" />
-                 </div>
-                 <div className="flex-1 min-w-0">
-                   <div className="flex items-start gap-1">
-                     <p className="font-semibold text-slate-900 leading-tight break-words">{displayName}</p>
-                     {tx.person_id && <ChevronRight className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />}
+             <div className="flex flex-col p-4 bg-white rounded-xl border border-slate-100 shadow-sm active:bg-slate-50 transition-colors group">
+               <div className="flex items-center justify-between gap-4">
+                 <div className="flex items-center gap-3 flex-1 min-w-0">
+                   <div className="h-10 w-10 bg-green-50 rounded-full flex items-center justify-center border border-green-100 shrink-0">
+                     <Icon className="h-5 w-5 text-green-600" />
                    </div>
-                   <p className="text-xs text-slate-500 mt-1 break-words leading-snug">{new Date(tx.date).toLocaleDateString()} • {subText}</p>
+                   <div className="flex-1 min-w-0">
+                     <div className="flex items-start gap-1">
+                       <p className="font-semibold text-slate-900 leading-tight break-words">{displayName}</p>
+                       {tx.person_id && <ChevronRight className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />}
+                     </div>
+                     <p className="text-xs text-slate-500 mt-1 break-words leading-snug">{new Date(tx.date).toLocaleDateString()} • {subText}</p>
+                   </div>
                  </div>
-               </div>
-               
-               <div className="flex flex-col items-end gap-2 shrink-0">
-                 <p className="font-bold text-green-600 whitespace-nowrap">+৳{Number(tx.amount).toLocaleString()}</p>
                  
-                 {tx.type === 'INCOME' && (
-                   <div className="flex items-center gap-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
-                     <button 
-                       onClick={(e) => handleEditClick(tx, e)} 
-                       className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
-                     >
-                       <Edit className="h-4 w-4" />
-                     </button>
-                     <button 
-                       onClick={(e) => handleDeleteClick(tx.id, e)} 
-                       className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
-                     >
-                       <Trash2 className="h-4 w-4" />
-                     </button>
-                   </div>
-                 )}
+                 <div className="flex flex-col items-end gap-2 shrink-0">
+                   <p className="font-bold text-green-600 whitespace-nowrap">+৳{Number(tx.amount).toLocaleString()}</p>
+                   
+                   {tx.type === 'INCOME' && (
+                     <div className="flex items-center gap-1 opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity">
+                       <button 
+                         onClick={(e) => handleEditClick(tx, e)} 
+                         className="p-1.5 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                       >
+                         <Edit className="h-4 w-4" />
+                       </button>
+                       <button 
+                         onClick={(e) => handleDeleteClick(tx.id, e)} 
+                         className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                       >
+                         <Trash2 className="h-4 w-4" />
+                       </button>
+                     </div>
+                   )}
+                 </div>
                </div>
+
+               {/* Add Note Bubble logic here as well for consistency */}
+               {tx.description && (
+                  <div className="mt-3 pl-[52px] pr-2">
+                    <p className="text-[11px] text-slate-600 bg-slate-50 border border-slate-100 p-2.5 rounded-lg break-words leading-relaxed">
+                      <span className="font-bold text-slate-400 uppercase tracking-wider mr-1.5">Note:</span> 
+                      {tx.description}
+                    </p>
+                  </div>
+                )}
              </div>
            );
 
