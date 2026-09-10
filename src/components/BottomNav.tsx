@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { motion } from 'framer-motion';
-import { Home, Users, Settings, TrendingUp, TrendingDown } from 'lucide-react';
+import { Home, Users, Settings, TrendingUp, TrendingDown, Landmark } from 'lucide-react';
 
 export default function BottomNav() {
   const pathname = usePathname();
@@ -12,13 +12,14 @@ export default function BottomNav() {
     { name: 'Home', href: '/dashboard', icon: Home },
     { name: 'Income', href: '/dashboard/income', icon: TrendingUp },
     { name: 'Expense', href: '/dashboard/expense', icon: TrendingDown },
+    { name: 'Savings', href: '/dashboard/savings', icon: Landmark },
     { name: 'Ledger', href: '/dashboard/ledger', icon: Users },
     { name: 'Settings', href: '/dashboard/settings', icon: Settings },
   ];
 
   return (
     <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 pb-safe z-50">
-      <div className="max-w-md mx-auto px-4 h-16 flex justify-between items-center">
+      <div className="max-w-md mx-auto px-2 h-16 flex justify-between items-center">
         {navItems.map((item) => {
           // Highlight if the path matches or starts with the base path (for sub-pages)
           const isActive = pathname === item.href || (item.href !== '/dashboard' && pathname.startsWith(item.href));
@@ -39,7 +40,7 @@ export default function BottomNav() {
                   isActive ? 'text-blue-600' : 'text-slate-400 hover:text-slate-600'
                 }`}
               >
-                {/* Active Indicator Dot (Optional but adds a premium feel) */}
+                {/* Active Indicator Dot */}
                 <div className="relative">
                   <Icon className={`h-6 w-6 ${isActive ? 'stroke-[2.5px]' : 'stroke-2'}`} />
                   {isActive && (
@@ -50,7 +51,7 @@ export default function BottomNav() {
                   )}
                 </div>
 
-                <span className={`text-[10px] font-medium ${isActive ? 'font-semibold' : ''}`}>
+                <span className={`text-[9px] sm:text-[10px] font-medium ${isActive ? 'font-semibold' : ''}`}>
                   {item.name}
                 </span>
               </motion.div>
