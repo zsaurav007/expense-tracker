@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Bell, CheckCheck, Trash2, Megaphone, Calendar, Wallet } from 'lucide-react';
+import { Bell, CheckCheck, Trash2, Megaphone, Calendar, Wallet, Landmark } from 'lucide-react';
 
 type Notification = {
   id: string;
@@ -86,6 +86,7 @@ export default function NotificationBell() {
   const getIcon = (type: string) => {
     if (type === 'ADMIN_MESSAGE') return <Megaphone className="h-4 w-4 text-blue-500" />;
     if (type === 'RECURRING_BILL') return <Calendar className="h-4 w-4 text-orange-500" />;
+    if (type === 'SAVINGS_REMINDER') return <Landmark className="h-4 w-4 text-emerald-500" />;
     return <Wallet className="h-4 w-4 text-red-500" />; // LEDGER_DUE
   };
 
