@@ -2,7 +2,6 @@ import { NextResponse } from 'next/server';
 import { getServiceSupabase } from '@/lib/supabase';
 import { getSession } from '@/lib/auth';
 
-// 🛑 FORCE DYNAMIC: Prevents Next.js from caching a previous 500 error
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
@@ -12,6 +11,59 @@ export async function GET() {
 
     const supabase = getServiceSupabase();
     
+    // --- SMART SAVINGS REMINDER GENERATOR ---
+    const today = new Date();
+    const currentMonth = today.getMonth();
+    const currentYear = today.getFullYear();
+    const currentDay = today.getDate();
+
+    // 1. Fetch all savings profiles that have notification settings
+    const { data: savingsProfiles } = await supabase
+      .from('savings_profiles')
+      .select('*')
+      .eq('user_id', session.userId)
+      .not('installment_day', 'is', null)
+      .not('notify_days_before', 'is', null);
+
+    if (savingsProfiles && savingsProfiles.length > 0) {
+      const newNotifs = [];
+      const startOfMonth = new Date(currentYear, currentMonth, 1).toISOString();
+
+      for (const p of savingsProfiles) {
+        const dueDay = p.installment_day;
+        const notifyWindowStart = dueDay - p.notify_days_before;
+
+        // If today falls within the notification window
+        if (currentDay >= notifyWindowStart && currentDay <= dueDay) {
+          
+          // Check if we ALREADY generated a reminder for this specific goal this month
+          const { data: existing } = await supabase.from('app_notifications')
+            .select('id')
+            .eq('type', 'SAVINGS_REMINDER')
+            .eq('action_url', `/dashboard/savings/${p.id}`)
+            .gte('created_at', startOfMonth)
+            .limit(1);
+
+          if (!existing || existing.length === 0) {
+            newNotifs.push({
+              user_id: session.userId,
+              type: 'SAVINGS_REMINDER',
+              title: 'Savings Installment Due',
+              message: `Your installment of ৳${p.monthly_installment} for "${p.name}" is due on the ${dueDay}th.`,
+              action_url: `/dashboard/savings/${p.id}`
+            });
+          }
+        }
+      }
+
+      // Bulk insert any missing notifications
+      if (newNotifs.length > 0) {
+        await supabase.from('app_notifications').insert(newNotifs);
+      }
+    }
+    // --- END SMART GENERATOR ---
+
+    // Now fetch the combined list of notifications
     const { data, error } = await supabase
       .from('app_notifications')
       .select('*')
@@ -19,14 +71,10 @@ export async function GET() {
       .order('created_at', { ascending: false })
       .limit(30);
 
-    if (error) {
-      console.error("[NOTIFICATIONS SUPABASE ERROR]:", error);
-      throw error;
-    }
+    if (error) throw error;
 
     return NextResponse.json({ notifications: data });
   } catch (error: any) {
-    // THIS will now print the exact issue in your terminal
     console.error("[NOTIFICATIONS API CRASH]:", error); 
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
